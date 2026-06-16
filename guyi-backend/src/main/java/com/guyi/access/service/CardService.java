@@ -200,6 +200,7 @@ public class CardService {
             throw new RuntimeException("必须指定有效的应用 ID");
         }
 
+        List<Card> cards = new ArrayList<>();
         List<String> codes = new ArrayList<>();
         for (int i = 0; i < count; i++) {
             String code = (prefix != null ? prefix : "") + CardCodeGenerator.generate(16);
@@ -209,9 +210,10 @@ public class CardService {
             card.setNotes(note);
             card.setAppId(appId);
             card.setDuration(customDuration);
-            cardRepository.save(card);
+            cards.add(card);
             codes.add(code);
         }
+        cardRepository.saveAll(cards);
         return codes;
     }
 
@@ -362,6 +364,14 @@ public class CardService {
 
     public List<Card> searchCards(String keyword) {
         return cardRepository.searchByKeyword(keyword);
+    }
+
+    public Page<Card> searchCardsPaged(String keyword, Pageable pageable) {
+        return cardRepository.searchByKeywordPaged(keyword, pageable);
+    }
+
+    public Optional<Card> getCardByCode(String cardCode) {
+        return cardRepository.findByCardCode(cardCode);
     }
 
     public List<Card> getCardsByIds(List<Integer> ids) {

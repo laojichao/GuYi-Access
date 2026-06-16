@@ -149,7 +149,11 @@ public class VerifyController {
     }
 
     private ResponseEntity<?> handleAdminAction(VerifyRequest request, String clientIp) {
-        if (!adminApiToken.equals(request.getApiToken())) {
+        // Constant-time comparison to prevent timing attacks
+        String provided = request.getApiToken();
+        if (provided == null || !java.security.MessageDigest.isEqual(
+                adminApiToken.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                (provided != null ? provided : "").getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
             return ok(ApiResponse.error(403, "无权操作：对接通信密钥(api_token)错误或未提供！"));
         }
 
@@ -187,10 +191,8 @@ public class VerifyController {
             return ok(ApiResponse.error(400, "缺少要操作的卡密(card_code)参数"));
         }
 
-        // Find card
-        com.guyi.access.entity.Card card = cardService.searchCards(cardCode).stream()
-                .filter(c -> c.getCardCode().equals(cardCode))
-                .findFirst().orElse(null);
+        // Find card by exact code (uses unique index, not fuzzy search)
+        com.guyi.access.entity.Card card = cardService.getCardByCode(cardCode).orElse(null);
 
         if (card == null) {
             return ok(ApiResponse.error(404, "该卡密不存在于数据库中"));
@@ -219,22 +221,30 @@ public class VerifyController {
         }
     }
 
-    private ResponseEntity<?> encryptedResponse(int code, String msg, Object data, String appKey) {
-        try {
-            String json = objectMapper.writeValueAsString(ApiResponse.success(msg, data));
-            // Check if encryption is enabled in system settings
-            String encryptEnabled = "1";
-            try {
-                Map<String, String> settings = systemService.getSystemSettings();
-                encryptEnabled = settings.getOrDefault("api_encrypt", "1");
-            } catch (Exception ignored) {}
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(VerifyController.class);
 
-            if ("1".equals(encryptEnabled) && appKey != null && appKey.length() == 64) {
+    private ResponseEntity<?> encryptedResponse(int code, String msg, Object data, String appKey) {
+        String json;
+        try {
+            json = objectMapper.writeValueAsString(ApiResponse.success(msg, data));
+        } catch (Exception e) {
+            log.error("Failed to serialize response", e);
+            return ResponseEntity.ok(ApiResponse.success(msg, data));
+        }
+
+        String encryptEnabled = "1";
+        try {
+            Map<String, String> settings = systemService.getSystemSettings();
+            encryptEnabled = settings.getOrDefault("api_encrypt", "1");
+        } catch (Exception ignored) {}
+
+        if ("1".equals(encryptEnabled) && appKey != null && appKey.length() == 64) {
+            try {
                 String encrypted = AesUtil.encrypt(json, appKey);
                 return ResponseEntity.ok(Map.of("encrypted_data", encrypted));
+            } catch (Exception e) {
+                log.warn("AES encryption failed for appKey={}..., falling back to plaintext", appKey.substring(0, 8), e);
             }
-        } catch (Exception e) {
-            // Fall through to unencrypted
         }
         return ResponseEntity.ok(ApiResponse.success(msg, data));
     }
@@ -243,18 +253,21 @@ public class VerifyController {
         return ResponseEntity.ok(response);
     }
 
+    @Value("${app.trust-proxy:false}")
+    private boolean trustProxy;
+
     private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip != null && !ip.isEmpty() && !"unknown".equalsIgnoreCase(ip)) {
-            ip = ip.split(",")[0].trim();
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+        if (trustProxy) {
+            String ip = request.getHeader("X-Forwarded-For");
+            if (ip != null && !ip.isEmpty() && !"unknown".equalsIgnoreCase(ip)) {
+                return ip.split(",")[0].trim();
+            }
             ip = request.getHeader("X-Real-IP");
+            if (ip != null && !ip.isEmpty() && !"unknown".equalsIgnoreCase(ip)) {
+                return ip;
+            }
         }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getRemoteAddr();
-        }
-        return ip;
+        return request.getRemoteAddr();
     }
 
     private String md5(String input) {

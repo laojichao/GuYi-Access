@@ -8,7 +8,8 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "cards", indexes = {
     @Index(name = "idx_card_app", columnList = "app_id"),
-    @Index(name = "idx_card_hash", columnList = "device_hash")
+    @Index(name = "idx_card_hash", columnList = "device_hash"),
+    @Index(name = "idx_card_status_expire", columnList = "status,expire_time")
 })
 public class Card {
 

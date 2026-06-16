@@ -59,6 +59,10 @@ public interface CardRepository extends JpaRepository<Card, Integer> {
            "(c.cardCode LIKE %:keyword% OR c.notes LIKE %:keyword% OR c.deviceHash LIKE %:keyword% OR a.appName LIKE %:keyword% OR c.cardType LIKE %:keyword%)")
     List<Card> searchByKeyword(@Param("keyword") String keyword);
 
+    @Query("SELECT c FROM Card c JOIN Application a ON c.appId = a.id WHERE c.appId > 0 AND " +
+           "(c.cardCode LIKE %:keyword% OR c.notes LIKE %:keyword% OR c.deviceHash LIKE %:keyword% OR a.appName LIKE %:keyword% OR c.cardType LIKE %:keyword%)")
+    Page<Card> searchByKeywordPaged(@Param("keyword") String keyword, Pageable pageable);
+
     @Query("SELECT c FROM Card c WHERE c.status = 1 AND c.expireTime < :now")
     List<Card> findExpiredCards(@Param("now") LocalDateTime now);
 

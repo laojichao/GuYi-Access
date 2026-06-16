@@ -95,11 +95,11 @@ public class AdminController {
     public ResponseEntity<?> updateApp(@PathVariable Integer id, @RequestBody Map<String, Object> body) {
         try {
             applicationService.updateApp(id,
-                    (String) body.get("app_name"),
-                    (String) body.getOrDefault("app_version", ""),
-                    (String) body.getOrDefault("app_notes", ""),
-                    (String) body.getOrDefault("update_url", ""),
-                    body.containsKey("force_update") ? (Integer) body.get("force_update") : 0
+                    toStr(body.get("app_name")),
+                    toStr(body.getOrDefault("app_version", "")),
+                    toStr(body.getOrDefault("app_notes", "")),
+                    toStr(body.getOrDefault("update_url", "")),
+                    toInt(body.get("force_update"))
             );
             return ResponseEntity.ok(ApiResponse.success("应用信息已更新"));
         } catch (Exception e) {
@@ -135,9 +135,9 @@ public class AdminController {
     public ResponseEntity<?> addVariable(@PathVariable Integer appId, @RequestBody Map<String, Object> body) {
         try {
             applicationService.addVariable(appId,
-                    (String) body.get("key"),
-                    (String) body.get("value"),
-                    (Integer) body.getOrDefault("is_public", 0));
+                    toStr(body.get("key")),
+                    toStr(body.get("value")),
+                    toInt(body.getOrDefault("is_public", 0)));
             return ResponseEntity.ok(ApiResponse.success("变量添加成功"));
         } catch (Exception e) {
             return ResponseEntity.ok(ApiResponse.error(400, e.getMessage()));
@@ -148,9 +148,9 @@ public class AdminController {
     public ResponseEntity<?> updateVariable(@PathVariable Integer id, @RequestBody Map<String, Object> body) {
         try {
             applicationService.updateVariable(id,
-                    (String) body.get("key"),
-                    (String) body.get("value"),
-                    (Integer) body.getOrDefault("is_public", 0));
+                    toStr(body.get("key")),
+                    toStr(body.get("value")),
+                    toInt(body.getOrDefault("is_public", 0)));
             return ResponseEntity.ok(ApiResponse.success("变量更新成功"));
         } catch (Exception e) {
             return ResponseEntity.ok(ApiResponse.error(400, e.getMessage()));
@@ -176,10 +176,11 @@ public class AdminController {
             @RequestParam(required = false) String q) {
 
         if (q != null && !q.isEmpty()) {
-            List<Card> results = cardService.searchCards(q);
+            org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, limit);
+            org.springframework.data.domain.Page<Card> searchPage = cardService.searchCardsPaged(q, pageable);
             Map<Integer, String> appNameMap = applicationService.getAllApps().stream()
                     .collect(java.util.stream.Collectors.toMap(a -> (Integer) a.get("id"), a -> (String) a.get("app_name")));
-            List<Map<String, Object>> enrichedCards = results.subList(0, Math.min(results.size(), limit)).stream().map(card -> {
+            List<Map<String, Object>> enrichedCards = searchPage.getContent().stream().map(card -> {
                 Map<String, Object> map = new java.util.LinkedHashMap<>();
                 map.put("id", card.getId());
                 map.put("cardCode", card.getCardCode());
@@ -197,8 +198,10 @@ public class AdminController {
                 return map;
             }).collect(java.util.stream.Collectors.toList());
             return ResponseEntity.ok(ApiResponse.success("OK", Map.of(
-                    "total", results.size(),
-                    "cards", enrichedCards
+                    "total", searchPage.getTotalElements(),
+                    "cards", enrichedCards,
+                    "page", searchPage.getNumber(),
+                    "totalPages", searchPage.getTotalPages()
             )));
         }
 
@@ -292,7 +295,7 @@ public class AdminController {
         if (hours <= 0 || hours > 8760) {
             return ResponseEntity.ok(ApiResponse.error(400, "补偿时长必须在 0-8760 小时之间"));
         }
-        Integer appId = body.containsKey("app_id") ? (Integer) body.get("app_id") : null;
+        Integer appId = body.containsKey("app_id") ? toInt(body.get("app_id")) : null;
         cardService.globalCompensate(hours, appId);
         return ResponseEntity.ok(ApiResponse.success("已成功为所有在用卡密补偿 " + hours + " 小时"));
     }
@@ -427,5 +430,15 @@ public class AdminController {
     @GetMapping("/card-types")
     public ResponseEntity<?> getCardTypes() {
         return ResponseEntity.ok(ApiResponse.success("OK", CardService.getCardTypes()));
+    }
+
+    private static Integer toInt(Object obj) {
+        if (obj == null) return 0;
+        if (obj instanceof Number) return ((Number) obj).intValue();
+        try { return Integer.parseInt(obj.toString()); } catch (Exception e) { return 0; }
+    }
+
+    private static String toStr(Object obj) {
+        return obj == null ? null : obj.toString();
     }
 }

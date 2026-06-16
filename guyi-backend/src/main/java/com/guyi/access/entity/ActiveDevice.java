@@ -8,7 +8,8 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "active_devices", indexes = {
     @Index(name = "idx_dev_hash", columnList = "device_hash"),
-    @Index(name = "idx_dev_expire", columnList = "expire_time")
+    @Index(name = "idx_dev_expire", columnList = "expire_time"),
+    @Index(name = "idx_dev_verify", columnList = "device_hash,status,app_id,expire_time")
 })
 public class ActiveDevice {
 

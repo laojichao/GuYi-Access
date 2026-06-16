@@ -51,6 +51,7 @@ public class SystemService {
         return map;
     }
 
+    @Transactional
     public void saveSystemSettings(Map<String, String> settings) {
         for (Map.Entry<String, String> entry : settings.entrySet()) {
             SystemSetting setting = systemSettingRepository.findById(entry.getKey())

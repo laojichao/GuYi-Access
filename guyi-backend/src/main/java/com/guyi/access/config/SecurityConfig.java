@@ -66,11 +66,18 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(Arrays.asList(allowedOrigins.split(",")));
+        List<String> origins = Arrays.asList(allowedOrigins.split(","));
+        // Spring rejects setAllowedOrigins("*") with setAllowCredentials(true)
+        if (origins.contains("*")) {
+            configuration.setAllowedOriginPatterns(List.of("*"));
+            configuration.setAllowCredentials(false);
+        } else {
+            configuration.setAllowedOrigins(origins);
+            configuration.setAllowCredentials(true);
+        }
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setExposedHeaders(List.of("Authorization"));
-        configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

@@ -29,8 +29,10 @@ public class ApplicationService {
     }
 
     public List<Map<String, Object>> getAllApps() {
-        List<Application> apps = applicationRepository.findAll(Sort.by(Sort.Direction.DESC, "createTime"));
-        return apps.stream().map(app -> {
+        List<Object[]> results = applicationRepository.findAllWithCardCount();
+        return results.stream().map(row -> {
+            Application app = (Application) row[0];
+            Long cardCount = (Long) row[1];
             Map<String, Object> map = new LinkedHashMap<>();
             map.put("id", app.getId());
             map.put("app_name", app.getAppName());
@@ -41,7 +43,7 @@ public class ApplicationService {
             map.put("notes", app.getNotes());
             map.put("update_url", app.getUpdateUrl());
             map.put("force_update", app.getForceUpdate());
-            map.put("card_count", cardRepository.countByAppId(app.getId()));
+            map.put("card_count", cardCount);
             return map;
         }).collect(Collectors.toList());
     }
@@ -128,6 +130,7 @@ public class ApplicationService {
         appVariableRepository.save(var);
     }
 
+    @Transactional
     public void deleteVariable(Integer id) {
         appVariableRepository.deleteById(id);
     }

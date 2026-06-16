@@ -14,6 +14,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Component
 public class RateLimitFilter implements Filter {
@@ -30,7 +31,7 @@ public class RateLimitFilter implements Filter {
     private final Map<String, RateEntry> rateMap = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private static final DateTimeFormatter MINUTE_FMT = DateTimeFormatter.ofPattern("HHmm");
-    private volatile long lastCleanup = System.currentTimeMillis();
+    private final AtomicLong lastCleanup = new AtomicLong(System.currentTimeMillis());
 
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
@@ -40,11 +41,12 @@ public class RateLimitFilter implements Filter {
         HttpServletResponse httpRes = (HttpServletResponse) response;
         String path = httpReq.getRequestURI();
 
-        boolean shouldLimit = path.contains("/api/verify") || path.contains("/api/auth/login");
-        if (shouldLimit) {
+        boolean isLogin = "/api/auth/login".equals(path);
+        boolean isVerify = "/api/verify".equals(path);
+        if (isLogin || isVerify) {
             String clientIp = getClientIp(httpReq);
             String currentMinute = MINUTE_FMT.format(LocalDateTime.now());
-            int limit = path.contains("/api/auth/login") ? loginMaxRequests : maxRequests;
+            int limit = isLogin ? loginMaxRequests : maxRequests;
 
             RateEntry entry = rateMap.compute(clientIp, (key, existing) -> {
                 if (existing == null || !existing.minute.equals(currentMinute)) {
@@ -64,9 +66,9 @@ public class RateLimitFilter implements Filter {
 
             // Periodic cleanup: evict stale entries every 5 minutes
             long now = System.currentTimeMillis();
-            if (now - lastCleanup > 300_000) {
+            long last = lastCleanup.get();
+            if (now - last > 300_000 && lastCleanup.compareAndSet(last, now)) {
                 cleanupStaleEntries(currentMinute);
-                lastCleanup = now;
             }
         }
 

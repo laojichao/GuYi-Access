@@ -66,7 +66,11 @@ public class AuthService {
         return adminRepository.findById(1).isPresent();
     }
 
-    public void initAdmin(String username, String password) {
+    @Transactional
+    public synchronized void initAdmin(String username, String password) {
+        if (adminRepository.findById(1).isPresent()) {
+            throw new RuntimeException("系统已安装");
+        }
         Admin admin = new Admin();
         admin.setId(1);
         admin.setUsername(username);
