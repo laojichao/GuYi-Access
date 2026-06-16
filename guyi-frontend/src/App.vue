@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 
@@ -20,6 +20,12 @@ const navItems = [
   { path: '/settings', label: '全局配置', icon: 'ph-gear' },
   { path: '/about', label: '关于系统', icon: 'ph-info' },
 ]
+
+onMounted(() => {
+  if (authStore.isLoggedIn) {
+    authStore.verifyToken()
+  }
+})
 
 function logout() {
   authStore.logout()

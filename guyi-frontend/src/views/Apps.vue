@@ -9,6 +9,16 @@ const createForm = ref({ app_name: '', app_version: '', app_notes: '' })
 const editModal = ref(false)
 const editForm = ref({ id: 0, app_name: '', app_version: '', app_notes: '', update_url: '', force_update: 0 })
 
+// Variables state
+const varsModal = ref(false)
+const varsAppId = ref(null)
+const varsAppName = ref('')
+const vars = ref([])
+const varsLoading = ref(false)
+const varForm = ref({ key: '', value: '', is_public: 0 })
+const editingVarId = ref(null)
+const editingVarForm = ref({ key: '', value: '', is_public: 0 })
+
 onMounted(loadApps)
 
 async function loadApps() {
@@ -54,6 +64,61 @@ async function deleteApp(id) {
     else alert(res.data.msg)
   } catch (e) { alert(e.response?.data?.msg || '删除失败') }
 }
+
+// ========== Variables Management ==========
+
+async function openVars(app) {
+  varsAppId.value = app.id
+  varsAppName.value = app.app_name
+  varsModal.value = true
+  editingVarId.value = null
+  varForm.value = { key: '', value: '', is_public: 0 }
+  await loadVars()
+}
+
+async function loadVars() {
+  varsLoading.value = true
+  try {
+    const res = await api.get(`/api/admin/apps/${varsAppId.value}/variables`)
+    if (res.data.code === 200) vars.value = res.data.data || []
+  } catch (e) { console.error(e) }
+  finally { varsLoading.value = false }
+}
+
+async function addVar() {
+  if (!varForm.value.key.trim()) { alert('变量名不能为空'); return }
+  try {
+    const res = await api.post(`/api/admin/apps/${varsAppId.value}/variables`, varForm.value)
+    if (res.data.code === 200) { varForm.value = { key: '', value: '', is_public: 0 }; loadVars() }
+    else alert(res.data.msg)
+  } catch (e) { alert('添加失败') }
+}
+
+function startEditVar(v) {
+  editingVarId.value = v.id
+  editingVarForm.value = { key: v.keyName || v.key_name || '', value: v.value || '', is_public: v.isPublic ?? v.is_public ?? 0 }
+}
+
+async function saveEditVar() {
+  try {
+    const res = await api.put(`/api/admin/variables/${editingVarId.value}`, editingVarForm.value)
+    if (res.data.code === 200) { editingVarId.value = null; loadVars() }
+    else alert(res.data.msg)
+  } catch (e) { alert('更新失败') }
+}
+
+function cancelEditVar() {
+  editingVarId.value = null
+}
+
+async function deleteVar(id) {
+  if (!confirm('确定删除该变量？')) return
+  try {
+    const res = await api.delete(`/api/admin/variables/${id}`)
+    if (res.data.code === 200) loadVars()
+    else alert(res.data.msg)
+  } catch (e) { alert('删除失败') }
+}
 </script>
 
 <template>
@@ -85,6 +150,7 @@ async function deleteApp(id) {
               <td style="padding:14px"><span :class="app.status === 1 ? 'pill pill-on' : 'pill pill-banned'" style="font-size:9px">{{ app.status === 1 ? '正常' : '禁用' }}</span></td>
               <td style="padding:14px;text-align:right">
                 <div style="display:flex;gap:4px;justify-content:flex-end">
+                  <button class="btn btn-sys-purple" style="font-size:10px;padding:4px 8px" @click="openVars(app)" title="变量管理"><i class="ph-bold ph-variable"></i></button>
                   <button class="btn btn-sys-blue" style="font-size:10px;padding:4px 8px" @click="openEdit(app)"><i class="ph-bold ph-pencil-simple"></i></button>
                   <button class="btn" :class="app.status === 1 ? 'btn-sys-orange' : 'btn-sys-green'" style="font-size:10px;padding:4px 8px" @click="toggleApp(app.id)"><i :class="app.status === 1 ? 'ph-bold ph-prohibit' : 'ph-bold ph-check'"></i></button>
                   <button class="btn btn-sys-red" style="font-size:10px;padding:4px 8px" @click="deleteApp(app.id)" :disabled="app.card_count > 0"><i class="ph-bold ph-trash"></i></button>
@@ -128,6 +194,59 @@ async function deleteApp(id) {
             <button type="submit" class="btn btn-sys-blue" style="flex:1;justify-content:center;padding:10px">保存</button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- Variables Modal -->
+    <div v-if="varsModal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px" @click.self="varsModal=false">
+      <div style="background:rgba(12,12,18,0.4);border:0.5px solid var(--liquid-border-hover);border-radius:28px;padding:32px;width:100%;max-width:580px;backdrop-filter:blur(8px);box-shadow:0 24px 80px rgba(0,0,0,0.32);max-height:80vh;display:flex;flex-direction:column">
+        <h3 style="font-size:14px;font-weight:700;margin-bottom:16px;color:rgba(255,255,255,0.9)"><i class="ph-fill ph-variable" style="color:var(--sys-purple);margin-right:6px"></i>{{ varsAppName }} - 变量管理</h3>
+
+        <!-- Add Variable Form -->
+        <form @submit.prevent="addVar" style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:1;min-width:100px"><label class="lbl">变量名</label><input v-model="varForm.key" class="field" required placeholder="如: api_url" /></div>
+          <div style="flex:2;min-width:120px"><label class="lbl">值</label><input v-model="varForm.value" class="field" placeholder="变量值" /></div>
+          <label style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--text-3);white-space:nowrap;padding-bottom:8px">
+            <input type="checkbox" v-model="varForm.is_public" :true-value="1" :false-value="0" style="accent-color:var(--sys-purple)" /> 公开
+          </label>
+          <button type="submit" class="btn btn-sys-purple" style="padding:8px 14px;font-size:10px"><i class="ph-bold ph-plus"></i> 添加</button>
+        </form>
+
+        <!-- Variables List -->
+        <div style="flex:1;overflow-y:auto">
+          <div v-if="varsLoading" style="text-align:center;color:var(--text-4);font-size:11px;padding:24px">加载中...</div>
+          <div v-else-if="!vars.length" style="text-align:center;color:var(--text-4);font-size:11px;padding:24px">暂无变量，添加后可在客户端通过API读取</div>
+          <div v-else style="display:flex;flex-direction:column;gap:6px">
+            <div v-for="v in vars" :key="v.id" style="padding:10px 12px;border-radius:12px;background:rgba(255,255,255,0.02);border:0.5px solid rgba(255,255,255,0.05)">
+              <template v-if="editingVarId === v.id">
+                <form @submit.prevent="saveEditVar" style="display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap">
+                  <input v-model="editingVarForm.key" class="field" style="flex:1;min-width:80px;font-size:11px;padding:6px 8px" required />
+                  <input v-model="editingVarForm.value" class="field" style="flex:2;min-width:100px;font-size:11px;padding:6px 8px" />
+                  <label style="display:flex;align-items:center;gap:3px;font-size:9px;color:var(--text-3);white-space:nowrap">
+                    <input type="checkbox" v-model="editingVarForm.is_public" :true-value="1" :false-value="0" style="accent-color:var(--sys-purple)" /> 公开
+                  </label>
+                  <button type="submit" class="btn btn-sys-green" style="padding:5px 8px;font-size:9px"><i class="ph-bold ph-check"></i></button>
+                  <button type="button" class="btn btn-liquid" style="padding:5px 8px;font-size:9px" @click="cancelEditVar"><i class="ph-bold ph-x"></i></button>
+                </form>
+              </template>
+              <template v-else>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--sys-purple)">{{ v.keyName || v.key_name }}</span>
+                  <span v-if="(v.isPublic ?? v.is_public) === 1" class="pill pill-on" style="font-size:8px;padding:2px 6px">公开</span>
+                  <span v-else class="pill pill-free" style="font-size:8px;padding:2px 6px">私有</span>
+                  <span style="flex:1"></span>
+                  <button class="btn btn-sys-blue" style="padding:3px 6px;font-size:9px" @click="startEditVar(v)"><i class="ph-bold ph-pencil-simple"></i></button>
+                  <button class="btn btn-sys-red" style="padding:3px 6px;font-size:9px" @click="deleteVar(v.id)"><i class="ph-bold ph-trash"></i></button>
+                </div>
+                <div style="font-size:10px;color:var(--text-2);margin-top:4px;word-break:break-all;font-family:'JetBrains Mono',monospace">{{ v.value || '(空)' }}</div>
+              </template>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:16px;padding-top:12px;border-top:0.5px solid rgba(255,255,255,0.05)">
+          <button class="btn btn-liquid" style="width:100%;justify-content:center;padding:10px" @click="varsModal=false">关闭</button>
+        </div>
       </div>
     </div>
   </div>

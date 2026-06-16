@@ -95,14 +95,14 @@ public class SystemService {
             List<Map<String, Object>> apps = (List<Map<String, Object>>) data.get("applications");
             for (Map<String, Object> row : apps) {
                 Application app = new Application();
-                app.setId(toInt(row.get("id")));
-                app.setAppName(toStr(row.get("app_name")));
-                app.setAppKey(toStr(row.get("app_key")));
-                app.setAppVersion(toStr(row.get("app_version")));
-                app.setStatus(toInt(row.get("status")));
-                app.setNotes(toStr(row.get("notes")));
-                app.setUpdateUrl(toStr(row.get("update_url")));
-                app.setForceUpdate(toInt(row.get("force_update")));
+                app.setId(toInt(getField(row, "id")));
+                app.setAppName(toStr(getField(row, "appName", "app_name")));
+                app.setAppKey(toStr(getField(row, "appKey", "app_key")));
+                app.setAppVersion(toStr(getField(row, "appVersion", "app_version")));
+                app.setStatus(toInt(getField(row, "status")));
+                app.setNotes(toStr(getField(row, "notes")));
+                app.setUpdateUrl(toStr(getField(row, "updateUrl", "update_url")));
+                app.setForceUpdate(toInt(getField(row, "forceUpdate", "force_update")));
                 applicationRepository.save(app);
             }
         }
@@ -112,11 +112,11 @@ public class SystemService {
             List<Map<String, Object>> vars = (List<Map<String, Object>>) data.get("app_variables");
             for (Map<String, Object> row : vars) {
                 AppVariable v = new AppVariable();
-                v.setId(toInt(row.get("id")));
-                v.setAppId(toInt(row.get("app_id")));
-                v.setKeyName(toStr(row.get("key_name")));
-                v.setValue(toStr(row.get("value")));
-                v.setIsPublic(toInt(row.get("is_public")));
+                v.setId(toInt(getField(row, "id")));
+                v.setAppId(toInt(getField(row, "appId", "app_id")));
+                v.setKeyName(toStr(getField(row, "keyName", "key_name")));
+                v.setValue(toStr(getField(row, "value")));
+                v.setIsPublic(toInt(getField(row, "isPublic", "is_public")));
                 appVariableRepository.save(v);
             }
         }
@@ -126,15 +126,15 @@ public class SystemService {
             List<Map<String, Object>> cards = (List<Map<String, Object>>) data.get("cards");
             for (Map<String, Object> row : cards) {
                 Card card = new Card();
-                card.setId(toInt(row.get("id")));
-                card.setCardCode(toStr(row.get("card_code")));
-                card.setCardType(toStr(row.get("card_type")));
-                card.setStatus(toInt(row.get("status")));
-                card.setDeviceHash(toStr(row.get("device_hash")));
-                card.setNotes(toStr(row.get("notes")));
-                card.setAppId(toInt(row.get("app_id")));
-                card.setCustomData(toStr(row.get("custom_data")));
-                card.setDuration(toInt(row.get("duration")));
+                card.setId(toInt(getField(row, "id")));
+                card.setCardCode(toStr(getField(row, "cardCode", "card_code")));
+                card.setCardType(toStr(getField(row, "cardType", "card_type")));
+                card.setStatus(toInt(getField(row, "status")));
+                card.setDeviceHash(toStr(getField(row, "deviceHash", "device_hash")));
+                card.setNotes(toStr(getField(row, "notes")));
+                card.setAppId(toInt(getField(row, "appId", "app_id")));
+                card.setCustomData(toStr(getField(row, "customData", "custom_data")));
+                card.setDuration(toInt(getField(row, "duration")));
                 cardRepository.save(card);
             }
         }
@@ -144,10 +144,10 @@ public class SystemService {
             List<Map<String, Object>> bls = (List<Map<String, Object>>) data.get("blacklists");
             for (Map<String, Object> row : bls) {
                 Blacklist bl = new Blacklist();
-                bl.setId(toInt(row.get("id")));
-                bl.setType(toStr(row.get("type")));
-                bl.setValue(toStr(row.get("value")));
-                bl.setReason(toStr(row.get("reason")));
+                bl.setId(toInt(getField(row, "id")));
+                bl.setType(toStr(getField(row, "type")));
+                bl.setValue(toStr(getField(row, "value")));
+                bl.setReason(toStr(getField(row, "reason")));
                 blacklistRepository.save(bl);
             }
         }
@@ -157,8 +157,8 @@ public class SystemService {
             List<Map<String, Object>> settings = (List<Map<String, Object>>) data.get("system_settings");
             for (Map<String, Object> row : settings) {
                 SystemSetting s = new SystemSetting();
-                s.setKeyName(toStr(row.get("key_name")));
-                s.setValue(toStr(row.get("value")));
+                s.setKeyName(toStr(getField(row, "keyName", "key_name")));
+                s.setValue(toStr(getField(row, "value")));
                 systemSettingRepository.save(s);
             }
         }
@@ -168,12 +168,12 @@ public class SystemService {
             List<Map<String, Object>> devices = (List<Map<String, Object>>) data.get("active_devices");
             for (Map<String, Object> row : devices) {
                 ActiveDevice d = new ActiveDevice();
-                d.setId(toInt(row.get("id")));
-                d.setDeviceHash(toStr(row.get("device_hash")));
-                d.setCardCode(toStr(row.get("card_code")));
-                d.setCardType(toStr(row.get("card_type")));
-                d.setStatus(toInt(row.get("status")));
-                d.setAppId(toInt(row.get("app_id")));
+                d.setId(toInt(getField(row, "id")));
+                d.setDeviceHash(toStr(getField(row, "deviceHash", "device_hash")));
+                d.setCardCode(toStr(getField(row, "cardCode", "card_code")));
+                d.setCardType(toStr(getField(row, "cardType", "card_type")));
+                d.setStatus(toInt(getField(row, "status")));
+                d.setAppId(toInt(getField(row, "appId", "app_id")));
                 activeDeviceRepository.save(d);
             }
         }
@@ -183,14 +183,14 @@ public class SystemService {
             List<Map<String, Object>> logs = (List<Map<String, Object>>) data.get("usage_logs");
             for (Map<String, Object> row : logs) {
                 UsageLog log = new UsageLog();
-                log.setId(toInt(row.get("id")));
-                log.setCardCode(toStr(row.get("card_code")));
-                log.setCardType(toStr(row.get("card_type")));
-                log.setDeviceHash(toStr(row.get("device_hash")));
-                log.setIpAddress(toStr(row.get("ip_address")));
-                log.setUserAgent(toStr(row.get("user_agent")));
-                log.setResult(toStr(row.get("result")));
-                log.setAppName(toStr(row.get("app_name")));
+                log.setId(toInt(getField(row, "id")));
+                log.setCardCode(toStr(getField(row, "cardCode", "card_code")));
+                log.setCardType(toStr(getField(row, "cardType", "card_type")));
+                log.setDeviceHash(toStr(getField(row, "deviceHash", "device_hash")));
+                log.setIpAddress(toStr(getField(row, "ipAddress", "ip_address")));
+                log.setUserAgent(toStr(getField(row, "userAgent", "user_agent")));
+                log.setResult(toStr(getField(row, "result")));
+                log.setAppName(toStr(getField(row, "appName", "app_name")));
                 usageLogRepository.save(log);
             }
         }
@@ -200,9 +200,9 @@ public class SystemService {
             List<Map<String, Object>> admins = (List<Map<String, Object>>) data.get("admin");
             for (Map<String, Object> row : admins) {
                 Admin admin = new Admin();
-                admin.setId(toInt(row.get("id")));
-                admin.setUsername(toStr(row.get("username")));
-                admin.setPasswordHash(toStr(row.get("password_hash")));
+                admin.setId(toInt(getField(row, "id")));
+                admin.setUsername(toStr(getField(row, "username")));
+                admin.setPasswordHash(toStr(getField(row, "passwordHash", "password_hash")));
                 adminRepository.save(admin);
             }
         }
@@ -216,5 +216,14 @@ public class SystemService {
 
     private String toStr(Object obj) {
         return obj == null ? "" : obj.toString();
+    }
+
+    private Object getField(Map<String, Object> row, String... keys) {
+        for (String key : keys) {
+            if (row.containsKey(key) && row.get(key) != null) {
+                return row.get(key);
+            }
+        }
+        return null;
     }
 }

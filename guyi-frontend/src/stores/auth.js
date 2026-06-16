@@ -30,5 +30,22 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('guyi_username')
   }
 
-  return { token, username, isLoggedIn, login, logout }
+  async function verifyToken() {
+    if (!token.value) return false
+    try {
+      const res = await api.get('/api/auth/me')
+      if (res.data.code === 200) {
+        username.value = res.data.data.username
+        localStorage.setItem('guyi_username', username.value)
+        return true
+      }
+      logout()
+      return false
+    } catch (e) {
+      logout()
+      return false
+    }
+  }
+
+  return { token, username, isLoggedIn, login, logout, verifyToken }
 })

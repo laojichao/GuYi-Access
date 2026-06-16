@@ -15,19 +15,16 @@ const searchQuery = ref('')
 const sort = ref('create_desc')
 const selectedIds = ref([])
 
-const cardTypes = {
-  hour: { name: '小时卡' },
-  day: { name: '天卡' },
-  week: { name: '周卡' },
-  month: { name: '月卡' },
-  season: { name: '季卡' },
-  year: { name: '年卡' }
-}
+const cardTypes = ref({})
 
 onMounted(async () => {
   try {
-    const res = await api.get('/api/admin/apps')
-    if (res.data.code === 200) apps.value = res.data.data
+    const [appsRes, typesRes] = await Promise.all([
+      api.get('/api/admin/apps'),
+      api.get('/api/admin/card-types')
+    ])
+    if (appsRes.data.code === 200) apps.value = appsRes.data.data
+    if (typesRes.data.code === 200) cardTypes.value = typesRes.data.data
   } catch (e) {}
 })
 

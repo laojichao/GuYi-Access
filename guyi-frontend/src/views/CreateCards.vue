@@ -7,19 +7,29 @@ const form = ref({ app_id: '', type: 'day', num: 10, pre: '', note: '', custom_h
 const showCustom = ref(false)
 const result = ref(null)
 const loading = ref(false)
+const cardTypes = ref([])
 
-const cardTypes = [
-  { key: 'hour', name: '小时卡', dur: '1小时' },
-  { key: 'day', name: '天卡', dur: '1天' },
-  { key: 'week', name: '周卡', dur: '7天' },
-  { key: 'month', name: '月卡', dur: '30天' },
-  { key: 'season', name: '季卡', dur: '90天' },
-  { key: 'year', name: '年卡', dur: '365天' },
-]
+function formatDuration(seconds) {
+  if (seconds >= 86400 * 365) return Math.round(seconds / (86400 * 365)) + '年'
+  if (seconds >= 86400 * 30) return Math.round(seconds / (86400 * 30)) + '个月'
+  if (seconds >= 86400) return Math.round(seconds / 86400) + '天'
+  if (seconds >= 3600) return Math.round(seconds / 3600) + '小时'
+  return seconds + '秒'
+}
 
 onMounted(async () => {
-  const res = await api.get('/api/admin/apps')
-  if (res.data.code === 200) apps.value = res.data.data.filter(a => a.status === 1)
+  const [appsRes, typesRes] = await Promise.all([
+    api.get('/api/admin/apps'),
+    api.get('/api/admin/card-types')
+  ])
+  if (appsRes.data.code === 200) apps.value = appsRes.data.data.filter(a => a.status === 1)
+  if (typesRes.data.code === 200) {
+    cardTypes.value = Object.entries(typesRes.data.data).map(([key, cfg]) => ({
+      key,
+      name: cfg.name,
+      dur: formatDuration(cfg.duration)
+    }))
+  }
 })
 
 async function generate(autoExport = false) {
