@@ -129,6 +129,28 @@ function toggleSort() {
   loadCards()
 }
 
+// navigator is not reachable from template expressions, so copying goes through here
+const copiedKey = ref('')
+
+async function copyText(text, key) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    copiedKey.value = key
+    setTimeout(() => { if (copiedKey.value === key) copiedKey.value = '' }, 1500)
+  } catch (e) { console.error('copy failed', e) }
+}
+
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit.value)))
 </script>
 
@@ -192,7 +214,7 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit.valu
             <tr v-for="card in cards" :key="card.id" style="border-bottom:0.5px solid rgba(255,255,255,0.02)">
               <td style="padding:14px;text-align:center"><input type="checkbox" :checked="selectedIds.includes(card.id)" @change="toggleSelect(card.id)" style="accent-color:var(--sys-pink)" /></td>
               <td style="padding:14px"><span class="pill pill-big" style="font-size:9px">{{ card.appName || apps.find(a => a.id === card.appId)?.app_name || '未分类' }}</span></td>
-              <td style="padding:14px"><span class="pill pill-free" style="font-size:10px;font-family:'JetBrains Mono',monospace;cursor:pointer" @click="navigator.clipboard?.writeText(card.cardCode)">{{ card.cardCode }}</span></td>
+              <td style="padding:14px"><span class="pill pill-free" style="font-size:10px;font-family:'JetBrains Mono',monospace;cursor:pointer" @click="copyText(card.cardCode, 'card-' + card.id)"><i v-if="copiedKey === 'card-' + card.id" class="ph-bold ph-check" style="color:var(--sys-green);margin-right:4px"></i>{{ card.cardCode }}</span></td>
               <td style="padding:14px"><span class="pill" :class="getStatusLabel(card).cls" style="font-size:9px">{{ getStatusLabel(card).text }}</span></td>
               <td style="padding:14px;font-size:9.5px;font-family:'JetBrains Mono',monospace;color:var(--text-4)">{{ card.expireTime ? new Date(card.expireTime).toLocaleString() : '-' }}</td>
               <td style="padding:14px;font-size:9.5px;font-family:'JetBrains Mono',monospace;color:var(--text-4)">{{ card.deviceHash ? card.deviceHash.substring(0, 10) + '...' : '-' }}</td>

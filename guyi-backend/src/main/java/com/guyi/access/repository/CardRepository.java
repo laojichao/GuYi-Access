@@ -1,9 +1,11 @@
 package com.guyi.access.repository;
 
 import com.guyi.access.entity.Card;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -16,6 +18,10 @@ public interface CardRepository extends JpaRepository<Card, Integer> {
     Optional<Card> findByCardCode(String cardCode);
 
     Optional<Card> findByCardCodeAndAppId(String cardCode, Integer appId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT c FROM Card c WHERE c.cardCode = :cardCode AND c.appId = :appId")
+    Optional<Card> findByCardCodeAndAppIdForUpdate(@Param("cardCode") String cardCode, @Param("appId") Integer appId);
 
     List<Card> findByIdIn(List<Integer> ids);
 
@@ -55,13 +61,14 @@ public interface CardRepository extends JpaRepository<Card, Integer> {
     @Query("SELECT c FROM Card c WHERE c.status = :status AND c.appId = :appId AND c.cardType = :cardType")
     Page<Card> findByStatusAndAppIdAndCardType(@Param("status") Integer status, @Param("appId") Integer appId, @Param("cardType") String cardType, Pageable pageable);
 
+    // Pattern is pre-escaped with '!' by the service layer to neutralize LIKE wildcards
     @Query("SELECT c FROM Card c JOIN Application a ON c.appId = a.id WHERE c.appId > 0 AND " +
-           "(c.cardCode LIKE %:keyword% OR c.notes LIKE %:keyword% OR c.deviceHash LIKE %:keyword% OR a.appName LIKE %:keyword% OR c.cardType LIKE %:keyword%)")
-    List<Card> searchByKeyword(@Param("keyword") String keyword);
+           "(c.cardCode LIKE :kw ESCAPE '!' OR c.notes LIKE :kw ESCAPE '!' OR c.deviceHash LIKE :kw ESCAPE '!' OR a.appName LIKE :kw ESCAPE '!' OR c.cardType LIKE :kw ESCAPE '!')")
+    List<Card> searchByKeyword(@Param("kw") String kw);
 
     @Query("SELECT c FROM Card c JOIN Application a ON c.appId = a.id WHERE c.appId > 0 AND " +
-           "(c.cardCode LIKE %:keyword% OR c.notes LIKE %:keyword% OR c.deviceHash LIKE %:keyword% OR a.appName LIKE %:keyword% OR c.cardType LIKE %:keyword%)")
-    Page<Card> searchByKeywordPaged(@Param("keyword") String keyword, Pageable pageable);
+           "(c.cardCode LIKE :kw ESCAPE '!' OR c.notes LIKE :kw ESCAPE '!' OR c.deviceHash LIKE :kw ESCAPE '!' OR a.appName LIKE :kw ESCAPE '!' OR c.cardType LIKE :kw ESCAPE '!')")
+    Page<Card> searchByKeywordPaged(@Param("kw") String kw, Pageable pageable);
 
     @Query("SELECT c FROM Card c WHERE c.status = 1 AND c.expireTime < :now")
     List<Card> findExpiredCards(@Param("now") LocalDateTime now);

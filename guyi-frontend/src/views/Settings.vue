@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import api from '../api'
 
 const settings = ref({ bg_blur: '0', api_encrypt: '1' })
-const passwordForm = ref({ new_password: '', confirm_password: '' })
+const passwordForm = ref({ old_password: '', new_password: '', confirm_password: '' })
 const loading = ref(true)
 
 onMounted(async () => {
@@ -23,12 +23,15 @@ async function saveSettings() {
 }
 
 async function updatePassword() {
+  if (!passwordForm.value.old_password) {
+    alert('请输入原密码'); return
+  }
   if (passwordForm.value.new_password !== passwordForm.value.confirm_password) {
     alert('两次输入的密码不一致'); return
   }
   try {
     const res = await api.put('/api/admin/password', passwordForm.value)
-    if (res.data.code === 200) { alert('密码已更新'); passwordForm.value = { new_password: '', confirm_password: '' } }
+    if (res.data.code === 200) { alert('密码已更新'); passwordForm.value = { old_password: '', new_password: '', confirm_password: '' } }
     else alert(res.data.msg)
   } catch (e) { alert('更新失败') }
 }
@@ -87,6 +90,7 @@ async function importData(event) {
       <div class="glass" style="padding:20px">
         <h3 style="font-size:12px;font-weight:700;margin-bottom:16px;color:var(--sys-red)"><i class="ph-fill ph-shield-check"></i> 安全设置</h3>
         <form @submit.prevent="updatePassword" style="display:flex;flex-direction:column;gap:12px">
+          <div><label class="lbl">原密码</label><input v-model="passwordForm.old_password" type="password" class="field" required /></div>
           <div><label class="lbl">新密码</label><input v-model="passwordForm.new_password" type="password" class="field" required /></div>
           <div><label class="lbl">确认密码</label><input v-model="passwordForm.confirm_password" type="password" class="field" required /></div>
           <button type="submit" class="btn btn-sys-red" style="width:100%;padding:12px;justify-content:center"><i class="ph-bold ph-lock-key"></i> 更新密码</button>

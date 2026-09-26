@@ -69,7 +69,8 @@ async function handleLogin() {
 
 <style scoped>
 .login-page { min-height: 100vh; position: relative; overflow: hidden; }
-.login-bg { position: fixed; inset: 0; background: url('https://www.loliapi.com/acg/pc/') center/cover no-repeat; z-index: 0; }
+/* Gradient is the fallback layer: if the external image service is unreachable, the page still renders */
+.login-bg { position: fixed; inset: 0; background: url('https://www.loliapi.com/acg/pc/') center/cover no-repeat, linear-gradient(160deg, #2b1b4d 0%, #141428 48%, #3d1130 100%); z-index: 0; }
 .login-bg::after { content: ''; position: fixed; inset: 0; background: rgba(0,0,0,0.3); backdrop-filter: blur(20px); }
 .login-petals { position: fixed; inset: 0; pointer-events: none; z-index: 1; overflow: hidden; }
 .login-petals i { position: absolute; width: 12px; height: 10px; background: linear-gradient(135deg,#ffd1e6,#ff9aca); border-radius: 80% 80% 80% 20%/80% 80% 20% 80%; opacity: 0.5; animation: petal-fall linear infinite; }

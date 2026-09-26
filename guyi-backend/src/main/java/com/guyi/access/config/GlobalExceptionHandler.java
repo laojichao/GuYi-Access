@@ -1,6 +1,7 @@
 package com.guyi.access.config;
 
 import com.guyi.access.dto.ApiResponse;
+import com.guyi.access.exception.BusinessException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -20,6 +21,13 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<?> handleIllegalArgument(IllegalArgumentException e) {
+        return ResponseEntity.ok(ApiResponse.error(400, e.getMessage()));
+    }
+
+    // Expected business rule violations: surface the real message to the client
+    @ExceptionHandler(BusinessException.class)
+    public ResponseEntity<?> handleBusiness(BusinessException e) {
+        log.info("Business rule violation: {}", e.getMessage());
         return ResponseEntity.ok(ApiResponse.error(400, e.getMessage()));
     }
 

@@ -54,6 +54,9 @@ public class AdminController {
         if (authService.isInstalled()) {
             return ResponseEntity.ok(ApiResponse.error(400, "系统已安装"));
         }
+        if (request.getAdminPassword() == null || request.getAdminPassword().length() < 6) {
+            return ResponseEntity.ok(ApiResponse.error(400, "管理员密码长度不能少于6位"));
+        }
         try {
             authService.initAdmin("GuYi", request.getAdminPassword());
             String token = authService.login("GuYi", request.getAdminPassword());
@@ -175,6 +178,9 @@ public class AdminController {
             @RequestParam(defaultValue = "create_desc") String sort,
             @RequestParam(required = false) String q) {
 
+        page = Math.max(0, page);
+        limit = Math.min(Math.max(1, limit), 100);
+
         if (q != null && !q.isEmpty()) {
             org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, limit);
             org.springframework.data.domain.Page<Card> searchPage = cardService.searchCardsPaged(q, pageable);
@@ -245,6 +251,9 @@ public class AdminController {
             }
             if (request.getAppId() == null || request.getAppId() <= 0) {
                 return ResponseEntity.ok(ApiResponse.error(400, "必须指定有效的应用"));
+            }
+            if (request.getCustomHours() != null && (request.getCustomHours() <= 0 || request.getCustomHours() > 8760)) {
+                return ResponseEntity.ok(ApiResponse.error(400, "自定义时长须在 0-8760 小时之间"));
             }
             int customDuration = request.getCustomHours() != null ? (int) (request.getCustomHours() * 3600) : 0;
             List<String> codes = cardService.generateCards(
@@ -321,7 +330,11 @@ public class AdminController {
 
     @PutMapping("/cards/{id}/status")
     public ResponseEntity<?> updateCardStatus(@PathVariable Integer id, @RequestBody Map<String, Integer> body) {
-        cardService.updateCardStatus(id, body.get("status"));
+        Integer status = body.get("status");
+        if (status == null || status < 0 || status > 2) {
+            return ResponseEntity.ok(ApiResponse.error(400, "状态值无效（0=未激活 1=已激活 2=封禁）"));
+        }
+        cardService.updateCardStatus(id, status);
         return ResponseEntity.ok(ApiResponse.success("卡密状态已更新"));
     }
 
@@ -365,6 +378,8 @@ public class AdminController {
     public ResponseEntity<?> getLogs(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "30") int limit) {
+        page = Math.max(0, page);
+        limit = Math.min(Math.max(1, limit), 200);
         org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, limit);
         return ResponseEntity.ok(ApiResponse.success("OK", usageLogRepository.findAllByOrderByAccessTimeDesc(pageable)));
     }
@@ -384,8 +399,15 @@ public class AdminController {
 
     @PutMapping("/password")
     public ResponseEntity<?> updatePassword(@RequestBody Map<String, String> body) {
+        String oldPwd = body.get("old_password");
         String newPwd = body.get("new_password");
         String confirmPwd = body.get("confirm_password");
+        if (oldPwd == null || oldPwd.isEmpty()) {
+            return ResponseEntity.ok(ApiResponse.error(400, "请输入原密码"));
+        }
+        if (!authService.verifyPassword(oldPwd)) {
+            return ResponseEntity.ok(ApiResponse.error(400, "原密码错误"));
+        }
         if (newPwd == null || newPwd.isEmpty()) {
             return ResponseEntity.ok(ApiResponse.error(400, "密码不能为空"));
         }

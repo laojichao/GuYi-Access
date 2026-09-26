@@ -4,6 +4,7 @@ import com.guyi.access.dto.ApiResponse;
 import com.guyi.access.dto.VerifyRequest;
 import com.guyi.access.entity.Application;
 import com.guyi.access.entity.AppVariable;
+import com.guyi.access.entity.Card;
 import com.guyi.access.service.ApplicationService;
 import com.guyi.access.service.BlacklistService;
 import com.guyi.access.service.CardService;
@@ -63,6 +64,9 @@ public class VerifyController {
                 if (device == null || device.isEmpty()) {
                     return ok(ApiResponse.error(400, "未提供需要拉黑的设备特征码(device_hash)"));
                 }
+                if (device.length() > 100) {
+                    return ok(ApiResponse.error(400, "设备特征码格式无效"));
+                }
                 blacklistService.addDeviceAndIpBlacklist(device, clientIp, "触发客户端安全防御策略");
                 return ok(ApiResponse.success("设备与所在IP已被系统成功拉黑"));
             }
@@ -93,12 +97,12 @@ public class VerifyController {
                 if (appInfo == null) {
                     return ok(ApiResponse.error(403, "AppKey 错误或不存在"));
                 }
-                updateData = Map.of(
-                        "version", appInfo.getAppVersion() != null ? appInfo.getAppVersion() : "",
-                        "url", appInfo.getUpdateUrl() != null ? appInfo.getUpdateUrl() : "",
-                        "log", appInfo.getNotes() != null ? appInfo.getNotes() : "",
-                        "force", appInfo.getForceUpdate()
-                );
+                // HashMap instead of Map.of: Map.of throws NPE when forceUpdate is null (legacy DB rows)
+                updateData = new LinkedHashMap<>();
+                updateData.put("version", appInfo.getAppVersion() != null ? appInfo.getAppVersion() : "");
+                updateData.put("url", appInfo.getUpdateUrl() != null ? appInfo.getUpdateUrl() : "");
+                updateData.put("log", appInfo.getNotes() != null ? appInfo.getNotes() : "");
+                updateData.put("force", appInfo.getForceUpdate() != null ? appInfo.getForceUpdate() : 0);
             }
 
             // Only app_key, no card_code -> return variables
@@ -121,9 +125,9 @@ public class VerifyController {
                 device = md5(clientIp);
             }
 
-            // Core verification
+            // Core verification (reuses the already-fetched app instead of re-querying by key)
             Map<String, Object> result = cardService.verifyCard(
-                    cardCode, device, appKey, request.getCustomData(), clientIp, userAgent);
+                    cardCode, device, appInfo, request.getCustomData(), clientIp, userAgent);
 
             if (Boolean.TRUE.equals(result.get("success"))) {
                 Map<String, Object> data = new LinkedHashMap<>();
@@ -145,6 +149,7 @@ public class VerifyController {
             }
 
         } catch (Exception e) {
+            log.error("Verify request failed: action={}, ip={}", action, clientIp, e);
             return ok(ApiResponse.error(500, "服务器内部错误"));
         }
     }
@@ -173,10 +178,17 @@ public class VerifyController {
                     return ok(ApiResponse.error(400, "生成失败：请提供有效的 app_id 或 app_key"));
                 }
                 int num = request.getNum() != null ? request.getNum() : 1;
+                if (num < 1 || num > 500) {
+                    return ok(ApiResponse.error(400, "生成失败：单次生成数量须在 1-500 之间"));
+                }
                 String type = request.getType() != null ? request.getType() : "day";
                 String pre = request.getPre() != null ? request.getPre() : "";
                 String note = request.getNote() != null ? request.getNote() : "API接口批量生卡";
-                int customDuration = request.getCustomHours() != null ? (int) (request.getCustomHours() * 3600) : 0;
+                Double customHours = request.getCustomHours();
+                if (customHours != null && (customHours <= 0 || customHours > 8760)) {
+                    return ok(ApiResponse.error(400, "生成失败：自定义时长须在 0-8760 小时之间"));
+                }
+                int customDuration = customHours != null ? (int) (customHours * 3600) : 0;
 
                 List<String> codes = cardService.generateCards(num, type, pre, note, appId, customDuration);
                 String cardStr = String.join("\n", codes);
@@ -193,7 +205,7 @@ public class VerifyController {
         }
 
         // Find card by exact code (uses unique index, not fuzzy search)
-        com.guyi.access.entity.Card card = cardService.getCardByCode(cardCode).orElse(null);
+        Card card = cardService.getCardByCode(cardCode).orElse(null);
 
         if (card == null) {
             return ok(ApiResponse.error(404, "该卡密不存在于数据库中"));
@@ -274,7 +286,7 @@ public class VerifyController {
     private String md5(String input) {
         try {
             java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
-            byte[] digest = md.digest(input.getBytes());
+            byte[] digest = md.digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             StringBuilder sb = new StringBuilder();
             for (byte b : digest) {
                 sb.append(String.format("%02x", b));

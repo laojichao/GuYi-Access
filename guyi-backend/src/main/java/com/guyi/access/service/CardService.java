@@ -1,6 +1,7 @@
 package com.guyi.access.service;
 
 import com.guyi.access.entity.*;
+import com.guyi.access.exception.BusinessException;
 import com.guyi.access.repository.*;
 import com.guyi.access.util.CardCodeGenerator;
 import org.springframework.transaction.annotation.Transactional;
@@ -10,7 +11,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -56,6 +56,23 @@ public class CardService {
     @Transactional
     public Map<String, Object> verifyCard(String cardCode, String deviceHash, String appKey, String customData,
                                            String clientIp, String userAgent) {
+        if (appKey == null || appKey.isEmpty()) {
+            return Map.of("success", false, "message", "鉴权失败：未提供AppKey");
+        }
+        Application app = applicationRepository.findByAppKey(appKey).orElse(null);
+        if (app == null) {
+            return Map.of("success", false, "message", "应用密钥无效");
+        }
+        return verifyCard(cardCode, deviceHash, app, customData, clientIp, userAgent);
+    }
+
+    /**
+     * Core verification. Accepts a pre-loaded application so callers that already resolved
+     * the app (e.g. the verify endpoint, which needs it for update-info) skip a redundant query.
+     */
+    @Transactional
+    public Map<String, Object> verifyCard(String cardCode, String deviceHash, Application app, String customData,
+                                           String clientIp, String userAgent) {
         // Cleanup expired devices randomly (1% chance)
         if (SECURE_RANDOM.nextInt(100) == 0) {
             activeDeviceRepository.deactivateExpiredDevices();
@@ -72,13 +89,8 @@ public class CardService {
             return Map.of("success", false, "message", "访问受限：设备或IP已被云端封禁 (" + reason + ")");
         }
 
-        if (appKey == null || appKey.isEmpty()) {
-            return Map.of("success", false, "message", "鉴权失败：未提供AppKey");
-        }
-
-        Application app = applicationRepository.findByAppKey(appKey).orElse(null);
         if (app == null) {
-            return Map.of("success", false, "message", "应用密钥无效");
+            return Map.of("success", false, "message", "鉴权失败：未提供AppKey");
         }
         if (app.getStatus() == 0) {
             return Map.of("success", false, "message", "应用已被禁用");
@@ -115,8 +127,9 @@ public class CardService {
             }
         }
 
-        // Look up the card
-        Card card = cardRepository.findByCardCodeAndAppId(cardCode, appId).orElse(null);
+        // Look up the card with a row lock so concurrent verifications of the same card
+        // (e.g. first activation from two devices) are serialized
+        Card card = cardRepository.findByCardCodeAndAppIdForUpdate(cardCode, appId).orElse(null);
         if (card == null) {
             return Map.of("success", false, "message", "无效的卡密 (或不属于当前应用)");
         }
@@ -126,7 +139,7 @@ public class CardService {
 
         if (card.getStatus() == 1) {
             // Already activated card
-            if (card.getExpireTime().isBefore(LocalDateTime.now())) {
+            if (card.getExpireTime() == null || card.getExpireTime().isBefore(LocalDateTime.now())) {
                 return Map.of("success", false, "message", "卡密已过期");
             }
             if (card.getDeviceHash() != null && !card.getDeviceHash().isEmpty()
@@ -153,10 +166,14 @@ public class CardService {
             activeDeviceRepository.deleteByCardCode(cardCode);
             activeDeviceRepository.save(newAd);
 
+            logUsage(cardCode, card.getCardType(), deviceHash, clientIp, userAgent, "验证通过", appName);
+
             return Map.of("success", true, "message", "验证通过",
                     "expire_time", card.getExpireTime().toString(),
                     "app_id", appId,
                     "custom_data", card.getCustomData() != null ? card.getCustomData() : "");
+        } else if (card.getStatus() != 0) {
+            return Map.of("success", false, "message", "卡密状态异常，请联系管理员");
         } else {
             // First activation (status == 0)
             int duration = card.getDuration() > 0 ? card.getDuration()
@@ -197,7 +214,7 @@ public class CardService {
     public List<String> generateCards(int count, String type, String prefix, String note,
                                        Integer appId, int customDuration) {
         if (appId == null || appId <= 0) {
-            throw new RuntimeException("必须指定有效的应用 ID");
+            throw new BusinessException("必须指定有效的应用 ID");
         }
 
         List<Card> cards = new ArrayList<>();
@@ -221,7 +238,7 @@ public class CardService {
 
     @Transactional
     public int batchDeleteCards(List<Integer> ids) {
-        if (ids.isEmpty()) return 0;
+        if (ids == null || ids.isEmpty()) return 0;
         List<Card> cards = cardRepository.findByIdIn(ids);
         List<String> codes = cards.stream().map(Card::getCardCode).collect(Collectors.toList());
         if (!codes.isEmpty()) {
@@ -232,7 +249,7 @@ public class CardService {
 
     @Transactional
     public int batchUnbindCards(List<Integer> ids) {
-        if (ids.isEmpty()) return 0;
+        if (ids == null || ids.isEmpty()) return 0;
         List<Card> cards = cardRepository.findByIdIn(ids);
         List<String> codes = cards.stream().map(Card::getCardCode).collect(Collectors.toList());
         if (!codes.isEmpty()) {
@@ -242,8 +259,8 @@ public class CardService {
     }
 
     @Transactional
-    public int batchAddTime(List<Integer> ids, double hours) {
-        if (ids.isEmpty() || hours <= 0) return 0;
+    public int batchAddTime(List<Integer> ids, Double hours) {
+        if (ids == null || ids.isEmpty() || hours == null || hours <= 0) return 0;
         long seconds = (long) (hours * 3600);
         List<Card> cards = cardRepository.findByIdIn(ids);
         List<String> codes = cards.stream()
@@ -257,8 +274,8 @@ public class CardService {
     }
 
     @Transactional
-    public int batchSubTime(List<Integer> ids, double hours) {
-        if (ids.isEmpty() || hours <= 0) return 0;
+    public int batchSubTime(List<Integer> ids, Double hours) {
+        if (ids == null || ids.isEmpty() || hours == null || hours <= 0) return 0;
         long seconds = (long) (hours * 3600);
         List<Card> cards = cardRepository.findByIdIn(ids);
         List<String> codes = cards.stream()
@@ -283,7 +300,7 @@ public class CardService {
     @Transactional
     public void updateCardStatus(Integer id, Integer status) {
         Card card = cardRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("卡密不存在"));
+                .orElseThrow(() -> new BusinessException("卡密不存在"));
         if (status == 1 && (card.getExpireTime() == null)) {
             status = 0;
         }
@@ -311,7 +328,9 @@ public class CardService {
         if (card == null || card.getStatus() != 1) return false;
 
         card.setDeviceHash(null);
-        card.setExpireTime(card.getExpireTime().minusHours(12));
+        if (card.getExpireTime() != null) {
+            card.setExpireTime(card.getExpireTime().minusHours(12));
+        }
         cardRepository.save(card);
         activeDeviceRepository.deleteByCardCode(cardCode);
         return true;
@@ -363,11 +382,27 @@ public class CardService {
     }
 
     public List<Card> searchCards(String keyword) {
-        return cardRepository.searchByKeyword(keyword);
+        return cardRepository.searchByKeyword(toLikePattern(keyword));
     }
 
     public Page<Card> searchCardsPaged(String keyword, Pageable pageable) {
-        return cardRepository.searchByKeywordPaged(keyword, pageable);
+        return cardRepository.searchByKeywordPaged(toLikePattern(keyword), pageable);
+    }
+
+    /**
+     * Wraps the keyword for a LIKE query and escapes %, _ and the escape character itself,
+     * so user input cannot inject wildcards (e.g. "%" alone would match every row).
+     */
+    private static String toLikePattern(String keyword) {
+        String kw = keyword == null ? "" : keyword.trim();
+        if (kw.isEmpty()) return "%";
+        StringBuilder sb = new StringBuilder(kw.length() + 8).append('%');
+        for (int i = 0; i < kw.length(); i++) {
+            char ch = kw.charAt(i);
+            if (ch == '!' || ch == '%' || ch == '_') sb.append('!');
+            sb.append(ch);
+        }
+        return sb.append('%').toString();
     }
 
     public Optional<Card> getCardByCode(String cardCode) {

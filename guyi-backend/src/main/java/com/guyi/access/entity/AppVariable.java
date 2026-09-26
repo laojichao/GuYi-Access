@@ -32,6 +32,8 @@ public class AppVariable {
 
     @PrePersist
     protected void onCreate() {
-        this.createTime = LocalDateTime.now();
+        if (this.createTime == null) {
+            this.createTime = LocalDateTime.now();
+        }
     }
 }

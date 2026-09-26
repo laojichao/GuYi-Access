@@ -1,0 +1,15 @@
+# Build output
+guyi-backend/target/
+guyi-frontend/dist/
+
+# Dependencies
+node_modules/
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Logs & OS files
+*.log
+.DS_Store
+Thumbs.db

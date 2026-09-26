@@ -1,6 +1,7 @@
 package com.guyi.access.service;
 
 import com.guyi.access.entity.Admin;
+import com.guyi.access.exception.BusinessException;
 import com.guyi.access.repository.AdminRepository;
 import com.guyi.access.util.JwtUtil;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -25,16 +26,25 @@ public class AuthService {
     public String login(String username, String password) {
         Optional<Admin> adminOpt = adminRepository.findById(1);
         if (adminOpt.isEmpty()) {
-            throw new RuntimeException("系统未安装");
+            throw new BusinessException("系统未安装");
         }
 
         Admin admin = adminOpt.get();
-        // Use constant-time comparison and same error message to prevent username enumeration
-        if (!admin.getUsername().equals(username) || !passwordEncoder.matches(password, admin.getPasswordHash())) {
-            throw new RuntimeException("用户名或密码错误");
+        // Always run the bcrypt comparison so response timing does not reveal whether the
+        // username or the password was wrong
+        boolean usernameOk = admin.getUsername().equals(username);
+        boolean passwordOk = passwordEncoder.matches(password, admin.getPasswordHash());
+        if (!usernameOk || !passwordOk) {
+            throw new BusinessException("用户名或密码错误");
         }
 
         return jwtUtil.generateToken(admin.getUsername());
+    }
+
+    public boolean verifyPassword(String password) {
+        return adminRepository.findById(1)
+                .map(admin -> passwordEncoder.matches(password, admin.getPasswordHash()))
+                .orElse(false);
     }
 
     public String getAdminUsername() {
@@ -45,14 +55,14 @@ public class AuthService {
 
     public void updatePassword(String newPassword) {
         Admin admin = adminRepository.findById(1)
-                .orElseThrow(() -> new RuntimeException("管理员不存在"));
+                .orElseThrow(() -> new BusinessException("管理员不存在"));
         admin.setPasswordHash(passwordEncoder.encode(newPassword));
         adminRepository.save(admin);
     }
 
     public void updateUsername(String newUsername) {
         Admin admin = adminRepository.findById(1)
-                .orElseThrow(() -> new RuntimeException("管理员不存在"));
+                .orElseThrow(() -> new BusinessException("管理员不存在"));
         admin.setUsername(newUsername);
         adminRepository.save(admin);
     }
@@ -70,7 +80,7 @@ public class AuthService {
     @Transactional
     public synchronized void initAdmin(String username, String password) {
         if (adminRepository.findById(1).isPresent()) {
-            throw new RuntimeException("系统已安装");
+            throw new BusinessException("系统已安装");
         }
         Admin admin = new Admin();
         admin.setId(1);

@@ -2,6 +2,7 @@ package com.guyi.access.service;
 
 import com.guyi.access.entity.Application;
 import com.guyi.access.entity.AppVariable;
+import com.guyi.access.exception.BusinessException;
 import com.guyi.access.repository.ApplicationRepository;
 import com.guyi.access.repository.AppVariableRepository;
 import com.guyi.access.repository.CardRepository;
@@ -62,10 +63,10 @@ public class ApplicationService {
     @Transactional
     public void updateApp(Integer id, String name, String version, String notes, String updateUrl, Integer forceUpdate) {
         if (applicationRepository.existsByAppNameAndIdNot(name, id)) {
-            throw new RuntimeException("应用名称已存在");
+            throw new BusinessException("应用名称已存在");
         }
         Application app = applicationRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("应用不存在"));
+                .orElseThrow(() -> new BusinessException("应用不存在"));
         app.setAppName(name);
         app.setAppVersion(version);
         app.setNotes(notes);
@@ -77,7 +78,7 @@ public class ApplicationService {
     @Transactional
     public void toggleAppStatus(Integer id) {
         Application app = applicationRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("应用不存在"));
+                .orElseThrow(() -> new BusinessException("应用不存在"));
         app.setStatus(app.getStatus() == 1 ? 0 : 1);
         applicationRepository.save(app);
     }
@@ -86,9 +87,9 @@ public class ApplicationService {
     public void deleteApp(Integer id) {
         long cardCount = cardRepository.countByAppId(id);
         if (cardCount > 0) {
-            throw new RuntimeException("无法删除：该应用下仍有 " + cardCount + " 张卡密。");
+            throw new BusinessException("无法删除：该应用下仍有 " + cardCount + " 张卡密。");
         }
-        appVariableRepository.findByAppId(id).forEach(v -> appVariableRepository.deleteById(v.getId()));
+        appVariableRepository.deleteByAppId(id);
         applicationRepository.deleteById(id);
     }
 
@@ -107,7 +108,7 @@ public class ApplicationService {
     @Transactional
     public void addVariable(Integer appId, String key, String value, Integer isPublic) {
         if (appVariableRepository.findByAppIdAndKeyName(appId, key).isPresent()) {
-            throw new RuntimeException("变量名重复");
+            throw new BusinessException("变量名重复");
         }
         AppVariable var = new AppVariable();
         var.setAppId(appId);
@@ -120,9 +121,9 @@ public class ApplicationService {
     @Transactional
     public void updateVariable(Integer id, String key, String value, Integer isPublic) {
         AppVariable var = appVariableRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("变量不存在"));
+                .orElseThrow(() -> new BusinessException("变量不存在"));
         if (appVariableRepository.existsByAppIdAndKeyNameAndIdNot(var.getAppId(), key, id)) {
-            throw new RuntimeException("变量名重复");
+            throw new BusinessException("变量名重复");
         }
         var.setKeyName(key);
         var.setValue(value);

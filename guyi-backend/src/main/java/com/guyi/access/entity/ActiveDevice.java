@@ -40,6 +40,8 @@ public class ActiveDevice {
 
     @PrePersist
     protected void onCreate() {
-        this.activateTime = LocalDateTime.now();
+        if (this.activateTime == null) {
+            this.activateTime = LocalDateTime.now();
+        }
     }
 }

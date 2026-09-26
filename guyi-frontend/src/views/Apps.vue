@@ -21,6 +21,28 @@ const editingVarForm = ref({ key: '', value: '', is_public: 0 })
 
 onMounted(loadApps)
 
+// navigator is not reachable from template expressions, so copying goes through here
+const copiedKey = ref('')
+
+async function copyText(text, key) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    copiedKey.value = key
+    setTimeout(() => { if (copiedKey.value === key) copiedKey.value = '' }, 1500)
+  } catch (e) { console.error('copy failed', e) }
+}
+
 async function loadApps() {
   loading.value = true
   try {
@@ -145,7 +167,7 @@ async function deleteVar(id) {
                 <div style="font-weight:700;font-size:13px;color:rgba(255,255,255,0.9)">{{ app.app_name }}</div>
                 <div style="font-size:10px;color:var(--text-4);margin-top:4px">{{ app.notes || '无备注' }}</div>
               </td>
-              <td style="padding:14px"><span class="pill pill-free" style="font-size:9px;cursor:pointer" @click="navigator.clipboard?.writeText(app.app_key)"><i class="ph-bold ph-key" style="color:#6bb0ff;margin-right:4px"></i>{{ app.app_key?.substring(0, 16) }}...</span></td>
+              <td style="padding:14px"><span class="pill pill-free" style="font-size:9px;cursor:pointer" @click="copyText(app.app_key, 'app-' + app.id)"><i v-if="copiedKey === 'app-' + app.id" class="ph-bold ph-check" style="color:var(--sys-green);margin-right:4px"></i><i v-else class="ph-bold ph-key" style="color:#6bb0ff;margin-right:4px"></i>{{ app.app_key?.substring(0, 16) }}...</span></td>
               <td style="padding:14px"><span class="pill pill-big" style="font-size:9px">{{ app.card_count }} 张</span></td>
               <td style="padding:14px"><span :class="app.status === 1 ? 'pill pill-on' : 'pill pill-banned'" style="font-size:9px">{{ app.status === 1 ? '正常' : '禁用' }}</span></td>
               <td style="padding:14px;text-align:right">

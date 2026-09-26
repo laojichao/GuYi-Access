@@ -41,6 +41,8 @@ public class UsageLog {
 
     @PrePersist
     protected void onCreate() {
-        this.accessTime = LocalDateTime.now();
+        if (this.accessTime == null) {
+            this.accessTime = LocalDateTime.now();
+        }
     }
 }
