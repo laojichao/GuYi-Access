@@ -2,6 +2,7 @@ package com.guyi.access.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guyi.access.entity.*;
+import com.guyi.access.exception.BusinessException;
 import com.guyi.access.repository.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,16 +55,32 @@ public class SystemService {
     @Transactional
     public void saveSystemSettings(Map<String, String> settings) {
         for (Map.Entry<String, String> entry : settings.entrySet()) {
-            SystemSetting setting = systemSettingRepository.findById(entry.getKey())
-                    .orElse(new SystemSetting());
-            setting.setKeyName(entry.getKey());
-            setting.setValue(entry.getValue());
+            String key = entry.getKey() == null ? null : entry.getKey().trim();
+            if (key == null || key.isEmpty()) {
+                throw new BusinessException("配置项名称不能为空");
+            }
+            if (key.length() > 50) {
+                throw new BusinessException("配置项名称不能超过 50 个字符：" + key);
+            }
+            String value = entry.getValue();
+            if (value != null && value.length() > 60000) {
+                throw new BusinessException("配置项内容过长：" + key);
+            }
+            SystemSetting setting = systemSettingRepository.findById(key).orElse(new SystemSetting());
+            setting.setKeyName(key);
+            setting.setValue(value);
             systemSettingRepository.save(setting);
         }
     }
 
+    /**
+     * @param includeCredentials when false (the default) the admin table - including the bcrypt
+     *                           password hash - is left out of the migration file. Importing such a
+     *                           file keeps the target's existing administrator, so a leaked export no
+     *                           longer hands out an offline-crackable hash.
+     */
     @Transactional
-    public Map<String, Object> exportAllData() {
+    public Map<String, Object> exportAllData(boolean includeCredentials) {
         Map<String, Object> data = new LinkedHashMap<>();
 
         data.put("applications", applicationRepository.findAll());
@@ -73,14 +90,25 @@ public class SystemService {
         data.put("usage_logs", usageLogRepository.findAll());
         data.put("blacklists", blacklistRepository.findAll());
         data.put("system_settings", systemSettingRepository.findAll());
-        data.put("admin", adminRepository.findAll());
+        if (includeCredentials) {
+            data.put("admin", adminRepository.findAll());
+        }
 
         return data;
     }
 
+    /**
+     * @return true when the import file carried admin credentials (the administrator account was
+     *         therefore overwritten); false when the target's existing administrator was kept.
+     */
     @Transactional
     @SuppressWarnings("unchecked")
-    public void importAllData(Map<String, Object> data) {
+    public boolean importAllData(Map<String, Object> data) {
+        // Applications are imported first so every dependent row can be remapped onto the ids the
+        // target database actually assigned: IDENTITY columns ignore the ids carried by the file,
+        // which used to leave cards/variables/devices pointing at non-existent app ids.
+        Map<Integer, Integer> appIdMap = new HashMap<>();
+
         // Clear all tables
         usageLogRepository.deleteAll();
         activeDeviceRepository.deleteAll();
@@ -107,7 +135,9 @@ public class SystemService {
                 app.setNotes(toStr(getField(row, "notes")));
                 app.setUpdateUrl(toStr(getField(row, "updateUrl", "update_url")));
                 app.setForceUpdate(toInt(getField(row, "forceUpdate", "force_update")));
-                applicationRepository.save(app);
+                // save() returns the managed row carrying the id the database actually assigned
+                Application saved = applicationRepository.save(app);
+                appIdMap.put(toInt(getField(row, "id")), saved.getId());
             }
         }
 
@@ -117,7 +147,8 @@ public class SystemService {
             for (Map<String, Object> row : vars) {
                 AppVariable v = new AppVariable();
                 v.setId(toInt(getField(row, "id")));
-                v.setAppId(toInt(getField(row, "appId", "app_id")));
+                int oldAppId = toInt(getField(row, "appId", "app_id"));
+                v.setAppId(appIdMap.getOrDefault(oldAppId, oldAppId));
                 v.setKeyName(toStr(getField(row, "keyName", "key_name")));
                 v.setValue(toStr(getField(row, "value")));
                 v.setIsPublic(toInt(getField(row, "isPublic", "is_public")));
@@ -144,7 +175,8 @@ public class SystemService {
                 card.setExpireTime(toDateTime(getField(row, "expireTime", "expire_time")));
                 card.setCreateTime(toDateTime(getField(row, "createTime", "create_time")));
                 card.setNotes(toStr(getField(row, "notes")));
-                card.setAppId(toInt(getField(row, "appId", "app_id")));
+                int oldCardAppId = toInt(getField(row, "appId", "app_id"));
+                card.setAppId(appIdMap.getOrDefault(oldCardAppId, oldCardAppId));
                 card.setCustomData(toStr(getField(row, "customData", "custom_data")));
                 card.setDuration(toInt(getField(row, "duration")));
                 cardRepository.save(card);
@@ -195,7 +227,8 @@ public class SystemService {
                 d.setActivateTime(toDateTime(getField(row, "activateTime", "activate_time")));
                 d.setExpireTime(expireTime);
                 d.setStatus(toInt(getField(row, "status")));
-                d.setAppId(toInt(getField(row, "appId", "app_id")));
+                int oldDeviceAppId = toInt(getField(row, "appId", "app_id"));
+                d.setAppId(appIdMap.getOrDefault(oldDeviceAppId, oldDeviceAppId));
                 activeDeviceRepository.save(d);
             }
         }
@@ -221,7 +254,10 @@ public class SystemService {
             }
         }
 
-        // Import admin
+        // Import admin. The admin table is deliberately NOT cleared above: an import file without
+        // credentials must not leave the system uninstalled (locking the operator out), while a file
+        // that does carry them intentionally replaces the account.
+        boolean adminImported = false;
         if (data.containsKey("admin")) {
             List<Map<String, Object>> admins = (List<Map<String, Object>>) data.get("admin");
             for (Map<String, Object> row : admins) {
@@ -230,8 +266,10 @@ public class SystemService {
                 admin.setUsername(toStr(getField(row, "username")));
                 admin.setPasswordHash(toStr(getField(row, "passwordHash", "password_hash")));
                 adminRepository.save(admin);
+                adminImported = true;
             }
         }
+        return adminImported;
     }
 
     private Integer toInt(Object obj) {

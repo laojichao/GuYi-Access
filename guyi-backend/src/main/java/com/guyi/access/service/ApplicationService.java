@@ -49,10 +49,17 @@ public class ApplicationService {
         }).collect(Collectors.toList());
     }
 
+    @Transactional
     public String createApp(String name, String version, String notes) {
+        if (name == null || name.trim().isEmpty()) {
+            throw new BusinessException("应用名称不能为空");
+        }
+        if (applicationRepository.existsByAppName(name.trim())) {
+            throw new BusinessException("应用名称已存在");
+        }
         String appKey = generateAppKey();
         Application app = new Application();
-        app.setAppName(name);
+        app.setAppName(name.trim());
         app.setAppKey(appKey);
         app.setAppVersion(version);
         app.setNotes(notes);
@@ -62,12 +69,15 @@ public class ApplicationService {
 
     @Transactional
     public void updateApp(Integer id, String name, String version, String notes, String updateUrl, Integer forceUpdate) {
-        if (applicationRepository.existsByAppNameAndIdNot(name, id)) {
+        if (name == null || name.trim().isEmpty()) {
+            throw new BusinessException("应用名称不能为空");
+        }
+        if (applicationRepository.existsByAppNameAndIdNot(name.trim(), id)) {
             throw new BusinessException("应用名称已存在");
         }
         Application app = applicationRepository.findById(id)
                 .orElseThrow(() -> new BusinessException("应用不存在"));
-        app.setAppName(name);
+        app.setAppName(name.trim());
         app.setAppVersion(version);
         app.setNotes(notes);
         app.setUpdateUrl(updateUrl);
@@ -107,6 +117,7 @@ public class ApplicationService {
 
     @Transactional
     public void addVariable(Integer appId, String key, String value, Integer isPublic) {
+        key = validateVariableKey(key);
         if (appVariableRepository.findByAppIdAndKeyName(appId, key).isPresent()) {
             throw new BusinessException("变量名重复");
         }
@@ -120,6 +131,7 @@ public class ApplicationService {
 
     @Transactional
     public void updateVariable(Integer id, String key, String value, Integer isPublic) {
+        key = validateVariableKey(key);
         AppVariable var = appVariableRepository.findById(id)
                 .orElseThrow(() -> new BusinessException("变量不存在"));
         if (appVariableRepository.existsByAppIdAndKeyNameAndIdNot(var.getAppId(), key, id)) {
@@ -129,6 +141,17 @@ public class ApplicationService {
         var.setValue(value);
         var.setIsPublic(isPublic);
         appVariableRepository.save(var);
+    }
+
+    private static String validateVariableKey(String key) {
+        if (key == null || key.trim().isEmpty()) {
+            throw new BusinessException("变量名不能为空");
+        }
+        String trimmed = key.trim();
+        if (trimmed.length() > 50) {
+            throw new BusinessException("变量名不能超过 50 个字符");
+        }
+        return trimmed;
     }
 
     @Transactional

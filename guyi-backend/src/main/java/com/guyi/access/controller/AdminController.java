@@ -2,8 +2,12 @@ package com.guyi.access.controller;
 
 import com.guyi.access.dto.*;
 import com.guyi.access.entity.*;
+import com.guyi.access.exception.BusinessException;
 import com.guyi.access.repository.*;
 import com.guyi.access.service.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -20,6 +24,8 @@ import java.util.*;
 @RequestMapping("/api/admin")
 public class AdminController {
 
+    private static final Logger log = LoggerFactory.getLogger(AdminController.class);
+
     private final ApplicationService applicationService;
     private final CardService cardService;
     private final DashboardService dashboardService;
@@ -27,7 +33,7 @@ public class AdminController {
     private final SystemService systemService;
     private final AuthService authService;
     private final ObjectMapper objectMapper;
-    private final UsageLogRepository usageLogRepository;
+    private final AuditLogService auditLogService;
 
     public AdminController(ApplicationService applicationService,
                            CardService cardService,
@@ -36,7 +42,7 @@ public class AdminController {
                            SystemService systemService,
                            AuthService authService,
                            ObjectMapper objectMapper,
-                           UsageLogRepository usageLogRepository) {
+                           AuditLogService auditLogService) {
         this.applicationService = applicationService;
         this.cardService = cardService;
         this.dashboardService = dashboardService;
@@ -44,24 +50,45 @@ public class AdminController {
         this.systemService = systemService;
         this.authService = authService;
         this.objectMapper = objectMapper;
-        this.usageLogRepository = usageLogRepository;
+        this.auditLogService = auditLogService;
     }
 
     // ========== Install ==========
+
+    /** Was hard-coded to "GuYi" while app.admin.default-username sat unused in the configuration. */
+    @Value("${app.admin.default-username:GuYi}")
+    private String defaultAdminUsername;
+
+    /**
+     * Empty by default (= no token required, previous behaviour). When set, the install endpoint
+     * demands it, so a freshly deployed instance cannot be claimed by whoever finds it first.
+     */
+    @Value("${app.install-token:}")
+    private String installToken;
 
     @PostMapping("/install")
     public ResponseEntity<?> install(@RequestBody InstallRequest request) {
         if (authService.isInstalled()) {
             return ResponseEntity.ok(ApiResponse.error(400, "系统已安装"));
         }
+        if (installToken != null && !installToken.isEmpty()) {
+            String provided = request.getInstallToken();
+            if (provided == null || !java.security.MessageDigest.isEqual(
+                    installToken.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    provided.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+                log.warn("Install rejected: missing or wrong install_token");
+                return ResponseEntity.ok(ApiResponse.error(403, "安装令牌(install_token)错误或未提供"));
+            }
+        }
         if (request.getAdminPassword() == null || request.getAdminPassword().length() < 6) {
             return ResponseEntity.ok(ApiResponse.error(400, "管理员密码长度不能少于6位"));
         }
         try {
-            authService.initAdmin("GuYi", request.getAdminPassword());
-            String token = authService.login("GuYi", request.getAdminPassword());
+            authService.initAdmin(defaultAdminUsername, request.getAdminPassword());
+            String token = authService.login(defaultAdminUsername, request.getAdminPassword());
             return ResponseEntity.ok(ApiResponse.success("安装成功", Map.of("token", token)));
         } catch (Exception e) {
+            log.error("Install failed", e);
             return ResponseEntity.ok(ApiResponse.error(500, "安装失败"));
         }
     }
@@ -90,7 +117,7 @@ public class AdminController {
             );
             return ResponseEntity.ok(ApiResponse.success("应用创建成功", Map.of("app_key", appKey)));
         } catch (Exception e) {
-            return ResponseEntity.ok(ApiResponse.error(400, e.getMessage()));
+            return fail(e);
         }
     }
 
@@ -106,7 +133,7 @@ public class AdminController {
             );
             return ResponseEntity.ok(ApiResponse.success("应用信息已更新"));
         } catch (Exception e) {
-            return ResponseEntity.ok(ApiResponse.error(400, e.getMessage()));
+            return fail(e);
         }
     }
 
@@ -122,7 +149,7 @@ public class AdminController {
             applicationService.deleteApp(id);
             return ResponseEntity.ok(ApiResponse.success("应用已删除"));
         } catch (Exception e) {
-            return ResponseEntity.ok(ApiResponse.error(400, e.getMessage()));
+            return fail(e);
         }
     }
 
@@ -143,7 +170,7 @@ public class AdminController {
                     toInt(body.getOrDefault("is_public", 0)));
             return ResponseEntity.ok(ApiResponse.success("变量添加成功"));
         } catch (Exception e) {
-            return ResponseEntity.ok(ApiResponse.error(400, e.getMessage()));
+            return fail(e);
         }
     }
 
@@ -156,7 +183,7 @@ public class AdminController {
                     toInt(body.getOrDefault("is_public", 0)));
             return ResponseEntity.ok(ApiResponse.success("变量更新成功"));
         } catch (Exception e) {
-            return ResponseEntity.ok(ApiResponse.error(400, e.getMessage()));
+            return fail(e);
         }
     }
 
@@ -182,8 +209,16 @@ public class AdminController {
         limit = Math.min(Math.max(1, limit), 100);
 
         if (q != null && !q.isEmpty()) {
-            org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, limit);
-            org.springframework.data.domain.Page<Card> searchPage = cardService.searchCardsPaged(q, pageable);
+            // Same whitelisted sort as the plain list, and the same filters: sentinel values stand
+            // in for "no filter" so the query never binds an untyped NULL.
+            org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(
+                    page, limit, CardService.buildSort(sort));
+            org.springframework.data.domain.Page<Card> searchPage = cardService.searchCardsPaged(
+                    q,
+                    status == null ? -1 : status,
+                    appId == null ? 0 : appId,
+                    type == null ? "" : type,
+                    pageable);
             Map<Integer, String> appNameMap = applicationService.getAllApps().stream()
                     .collect(java.util.stream.Collectors.toMap(a -> (Integer) a.get("id"), a -> (String) a.get("app_name")));
             List<Map<String, Object>> enrichedCards = searchPage.getContent().stream().map(card -> {
@@ -252,42 +287,75 @@ public class AdminController {
             if (request.getAppId() == null || request.getAppId() <= 0) {
                 return ResponseEntity.ok(ApiResponse.error(400, "必须指定有效的应用"));
             }
-            if (request.getCustomHours() != null && (request.getCustomHours() <= 0 || request.getCustomHours() > 8760)) {
-                return ResponseEntity.ok(ApiResponse.error(400, "自定义时长须在 0-8760 小时之间"));
+            // Absent or non-positive custom_hours means "standard card type" (this is what the PHP
+            // backend did too), so only an over-sized value is rejected; a positive value wins.
+            Double requestedHours = request.getCustomHours();
+            if (requestedHours != null && requestedHours > 8760) {
+                return ResponseEntity.ok(ApiResponse.error(400, "自定义时长不能超过 8760 小时"));
             }
-            int customDuration = request.getCustomHours() != null ? (int) (request.getCustomHours() * 3600) : 0;
+            int customDuration = requestedHours != null && requestedHours > 0
+                    ? (int) (requestedHours * 3600) : 0;
             List<String> codes = cardService.generateCards(
                     request.getNum(), request.getType(), request.getPre(),
                     request.getNote(), request.getAppId(), customDuration);
             return ResponseEntity.ok(ApiResponse.success("成功生成 " + codes.size() + " 张卡密",
                     Map.of("cards", codes)));
+        } catch (BusinessException e) {
+            // Surface the real reason (unknown card type, over-long prefix, ...) instead of "生成失败"
+            return ResponseEntity.ok(ApiResponse.error(400, e.getMessage()));
         } catch (Exception e) {
-            return ResponseEntity.ok(ApiResponse.error(400, "生成失败"));
+            return fail(e);
         }
     }
 
     @PostMapping("/cards/batch-delete")
     public ResponseEntity<?> batchDelete(@RequestBody BatchRequest request) {
+        if (request.getIds() == null || request.getIds().isEmpty()) {
+            return ResponseEntity.ok(ApiResponse.error(400, "未选择要删除的卡密"));
+        }
         int count = cardService.batchDeleteCards(request.getIds());
         return ResponseEntity.ok(ApiResponse.success("已批量删除 " + count + " 张卡密"));
     }
 
     @PostMapping("/cards/batch-unbind")
     public ResponseEntity<?> batchUnbind(@RequestBody BatchRequest request) {
+        if (request.getIds() == null || request.getIds().isEmpty()) {
+            return ResponseEntity.ok(ApiResponse.error(400, "未选择要解绑的卡密"));
+        }
         int count = cardService.batchUnbindCards(request.getIds());
         return ResponseEntity.ok(ApiResponse.success("已批量解绑 " + count + " 个设备"));
     }
 
     @PostMapping("/cards/batch-add-time")
     public ResponseEntity<?> batchAddTime(@RequestBody BatchRequest request) {
+        ResponseEntity<?> invalid = validateBatchTimeRequest(request, "增加");
+        if (invalid != null) {
+            return invalid;
+        }
         int count = cardService.batchAddTime(request.getIds(), request.getHours());
         return ResponseEntity.ok(ApiResponse.success("已为 " + count + " 张卡密增加 " + request.getHours() + " 小时"));
     }
 
     @PostMapping("/cards/batch-sub-time")
     public ResponseEntity<?> batchSubTime(@RequestBody BatchRequest request) {
+        ResponseEntity<?> invalid = validateBatchTimeRequest(request, "扣除");
+        if (invalid != null) {
+            return invalid;
+        }
         int count = cardService.batchSubTime(request.getIds(), request.getHours());
         return ResponseEntity.ok(ApiResponse.success("已为 " + count + " 张卡密扣除 " + request.getHours() + " 小时"));
+    }
+
+    /** Shared guard: an absent/zero/negative/oversized duration must fail loudly, not silently no-op. */
+    private ResponseEntity<?> validateBatchTimeRequest(BatchRequest request, String verb) {
+        if (request.getIds() == null || request.getIds().isEmpty()) {
+            return ResponseEntity.ok(ApiResponse.error(400, "未选择要" + verb + "时长的卡密"));
+        }
+        Double hours = request.getHours();
+        if (hours == null || hours <= 0 || hours > 8760) {
+            return ResponseEntity.ok(ApiResponse.error(400, "时长必须在 1-8760 小时之间"));
+        }
+        return null;
     }
 
     @PostMapping("/cards/global-compensate")
@@ -302,9 +370,18 @@ public class AdminController {
             return ResponseEntity.ok(ApiResponse.error(400, "hours 格式无效"));
         }
         if (hours <= 0 || hours > 8760) {
-            return ResponseEntity.ok(ApiResponse.error(400, "补偿时长必须在 0-8760 小时之间"));
+            return ResponseEntity.ok(ApiResponse.error(400, "补偿时长必须在 1-8760 小时之间"));
         }
-        Integer appId = body.containsKey("app_id") ? toInt(body.get("app_id")) : null;
+        Integer appId = null;
+        if (body.containsKey("app_id") && body.get("app_id") != null) {
+            appId = toIntOrNull(body.get("app_id"));
+            // Without this an invalid app_id was silently coerced to 0: it matched no row while the
+            // endpoint still reported success.
+            if (appId == null || appId <= 0) {
+                return ResponseEntity.ok(ApiResponse.error(400,
+                        "app_id 无效（需为正整数）；如需补偿全部应用请省略该参数"));
+            }
+        }
         cardService.globalCompensate(hours, appId);
         return ResponseEntity.ok(ApiResponse.success("已成功为所有在用卡密补偿 " + hours + " 小时"));
     }
@@ -317,7 +394,14 @@ public class AdminController {
 
     @PostMapping("/cards/batch-export")
     public void batchExport(@RequestBody BatchRequest request, HttpServletResponse response) throws IOException {
-        List<Card> cards = cardService.getCardsByIds(request.getIds());
+        List<Integer> ids = request.getIds();
+        if (ids == null || ids.isEmpty()) {
+            response.setStatus(400);
+            response.setContentType("application/json;charset=UTF-8");
+            response.getWriter().write("{\"code\":400,\"msg\":\"未选择要导出的卡密\"}");
+            return;
+        }
+        List<Card> cards = cardService.getCardsByIds(ids);
         response.setContentType("text/plain");
         response.setHeader("Content-Disposition", "attachment; filename=cards_export_" +
                 new java.text.SimpleDateFormat("yyyyMMddHHmmss").format(new Date()) + ".txt");
@@ -359,11 +443,12 @@ public class AdminController {
 
     @PostMapping("/blacklist")
     public ResponseEntity<?> addBlacklist(@RequestBody Map<String, String> body) {
-        blacklistService.addBlacklist(
+        boolean added = blacklistService.addBlacklist(
                 body.get("type"),
                 body.get("value"),
                 body.getOrDefault("reason", ""));
-        return ResponseEntity.ok(ApiResponse.success("云黑记录已添加"));
+        // Report honestly: a duplicate value used to answer "added" while writing nothing.
+        return ResponseEntity.ok(ApiResponse.success(added ? "云黑记录已添加" : "该值已在黑名单中，未重复添加"));
     }
 
     @DeleteMapping("/blacklist/{id}")
@@ -380,8 +465,7 @@ public class AdminController {
             @RequestParam(defaultValue = "30") int limit) {
         page = Math.max(0, page);
         limit = Math.min(Math.max(1, limit), 200);
-        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, limit);
-        return ResponseEntity.ok(ApiResponse.success("OK", usageLogRepository.findAllByOrderByAccessTimeDesc(pageable)));
+        return ResponseEntity.ok(ApiResponse.success("OK", auditLogService.getLogs(page, limit)));
     }
 
     // ========== Settings ==========
@@ -420,15 +504,18 @@ public class AdminController {
         if (!newPwd.equals(confirmPwd)) {
             return ResponseEntity.ok(ApiResponse.error(400, "两次输入的密码不一致"));
         }
-        authService.updatePassword(newPwd);
-        return ResponseEntity.ok(ApiResponse.success("密码已更新"));
+        // Changing the password revokes every previously issued token, so hand back a fresh one
+        String token = authService.updatePassword(newPwd);
+        return ResponseEntity.ok(ApiResponse.success("密码已更新，其他已登录会话已失效",
+                Map.of("token", token)));
     }
 
     // ========== System Export/Import ==========
 
     @GetMapping("/system/export")
-    public void exportSystem(HttpServletResponse response) throws IOException {
-        Map<String, Object> data = systemService.exportAllData();
+    public void exportSystem(@RequestParam(defaultValue = "false") boolean includeCredentials,
+                             HttpServletResponse response) throws IOException {
+        Map<String, Object> data = systemService.exportAllData(includeCredentials);
         response.setContentType("application/json;charset=UTF-8");
         response.setHeader("Content-Disposition", "attachment; filename=System_Migrate_" +
                 new java.text.SimpleDateFormat("yyyyMMddHHmmss").format(new Date()) + ".json");
@@ -440,9 +527,15 @@ public class AdminController {
         try {
             @SuppressWarnings("unchecked")
             Map<String, Object> data = objectMapper.readValue(file.getInputStream(), Map.class);
-            systemService.importAllData(data);
-            return ResponseEntity.ok(ApiResponse.success("完美迁移完成！系统数据已全部恢复。"));
+            boolean adminImported = systemService.importAllData(data);
+            // The admin table is intentionally preserved when the file carries no credentials, so
+            // state that plainly instead of claiming an unconditional full restore.
+            String adminNote = adminImported
+                    ? "管理员账号已按导入文件覆盖，请使用文件中的密码登录。"
+                    : "文件中不含管理员凭据，当前管理员账号与密码保持不变。";
+            return ResponseEntity.ok(ApiResponse.success("迁移完成，系统数据已恢复。" + adminNote));
         } catch (Exception e) {
+            log.error("System import failed", e);
             return ResponseEntity.ok(ApiResponse.error(500, "迁移导入失败"));
         }
     }
@@ -460,7 +553,23 @@ public class AdminController {
         try { return Integer.parseInt(obj.toString()); } catch (Exception e) { return 0; }
     }
 
+    /** Distinguishes "not supplied" from "supplied but invalid", which toInt() collapses to 0. */
+    private static Integer toIntOrNull(Object obj) {
+        if (obj == null) return null;
+        if (obj instanceof Number) return ((Number) obj).intValue();
+        try { return Integer.parseInt(obj.toString().trim()); } catch (Exception e) { return null; }
+    }
+
     private static String toStr(Object obj) {
         return obj == null ? null : obj.toString();
+    }
+
+    /** Business rule violations keep their message; everything else is logged and masked. */
+    private ResponseEntity<?> fail(Exception e) {
+        if (e instanceof BusinessException) {
+            return ResponseEntity.ok(ApiResponse.error(400, e.getMessage()));
+        }
+        log.error("Admin operation failed", e);
+        return ResponseEntity.ok(ApiResponse.error(500, "操作失败，请稍后重试"));
     }
 }

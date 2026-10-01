@@ -5,7 +5,6 @@ import com.guyi.access.exception.BusinessException;
 import com.guyi.access.repository.*;
 import com.guyi.access.util.CardCodeGenerator;
 import org.springframework.transaction.annotation.Transactional;
-import java.security.SecureRandom;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -28,43 +27,28 @@ public class CardService {
             "year", new int[]{31536000}
     );
 
+    /** card_code is varchar(50) and a generated code is 16 chars; keep a safety margin. */
+    private static final int MAX_CARD_PREFIX_LENGTH = 32;
+
     private final CardRepository cardRepository;
     private final ActiveDeviceRepository activeDeviceRepository;
-    private final ApplicationRepository applicationRepository;
     private final AppVariableRepository appVariableRepository;
     private final BlacklistRepository blacklistRepository;
     private final UsageLogRepository usageLogRepository;
 
     public CardService(CardRepository cardRepository,
                        ActiveDeviceRepository activeDeviceRepository,
-                       ApplicationRepository applicationRepository,
                        AppVariableRepository appVariableRepository,
                        BlacklistRepository blacklistRepository,
                        UsageLogRepository usageLogRepository) {
         this.cardRepository = cardRepository;
         this.activeDeviceRepository = activeDeviceRepository;
-        this.applicationRepository = applicationRepository;
         this.appVariableRepository = appVariableRepository;
         this.blacklistRepository = blacklistRepository;
         this.usageLogRepository = usageLogRepository;
     }
 
-    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
-
     // ========== Card Verification (core business logic from database.php verifyCard) ==========
-
-    @Transactional
-    public Map<String, Object> verifyCard(String cardCode, String deviceHash, String appKey, String customData,
-                                           String clientIp, String userAgent) {
-        if (appKey == null || appKey.isEmpty()) {
-            return Map.of("success", false, "message", "鉴权失败：未提供AppKey");
-        }
-        Application app = applicationRepository.findByAppKey(appKey).orElse(null);
-        if (app == null) {
-            return Map.of("success", false, "message", "应用密钥无效");
-        }
-        return verifyCard(cardCode, deviceHash, app, customData, clientIp, userAgent);
-    }
 
     /**
      * Core verification. Accepts a pre-loaded application so callers that already resolved
@@ -73,10 +57,8 @@ public class CardService {
     @Transactional
     public Map<String, Object> verifyCard(String cardCode, String deviceHash, Application app, String customData,
                                            String clientIp, String userAgent) {
-        // Cleanup expired devices randomly (1% chance)
-        if (SECURE_RANDOM.nextInt(100) == 0) {
-            activeDeviceRepository.deactivateExpiredDevices();
-        }
+        // Expired device sessions are now deactivated by MaintenanceService on a schedule instead of
+        // randomly inside this hot path (which also wrote during otherwise read-only verifications).
 
         // Check blacklist
         Optional<Blacklist> blByIp = blacklistRepository.findByTypeAndValue("ip", clientIp);
@@ -216,6 +198,20 @@ public class CardService {
         if (appId == null || appId <= 0) {
             throw new BusinessException("必须指定有效的应用 ID");
         }
+        if (count <= 0) {
+            throw new BusinessException("生成数量必须大于 0");
+        }
+        if (type == null || type.isEmpty()) {
+            type = "day";
+        }
+        // An unknown type would be stored as-is and later silently fall back to a 1-day card at
+        // activation, so reject it here instead (custom cards carry their own duration).
+        if (customDuration <= 0 && !CARD_TYPES.containsKey(type)) {
+            throw new BusinessException("无效的卡密类型：" + type + "，可选值：" + String.join("/", CARD_TYPES.keySet()));
+        }
+        if (prefix != null && prefix.length() > MAX_CARD_PREFIX_LENGTH) {
+            throw new BusinessException("卡密前缀不能超过 " + MAX_CARD_PREFIX_LENGTH + " 个字符");
+        }
 
         List<Card> cards = new ArrayList<>();
         List<String> codes = new ArrayList<>();
@@ -312,10 +308,15 @@ public class CardService {
         }
     }
 
+    // @Transactional is required on the entry points themselves: an internal this. call would
+    // bypass the Spring proxy, splitting the device cleanup and the card update into two
+    // independent transactions and leaving inconsistent state when the second one fails.
+    @Transactional
     public void deleteCard(Integer id) {
         batchDeleteCards(List.of(id));
     }
 
+    @Transactional
     public void resetDeviceBinding(Integer id) {
         batchUnbindCards(List.of(id));
     }
@@ -351,18 +352,44 @@ public class CardService {
         return ids.size();
     }
 
+    /**
+     * True when {@code deviceHash} provably belongs to the caller of this app: it has a live session
+     * there, or the supplied card is currently bound to it. Used to stop anonymous callers from
+     * blacklisting arbitrary device hashes through the ban_machine action.
+     */
+    @Transactional(readOnly = true)
+    public boolean isDeviceOwnedByApp(String deviceHash, Integer appId, String cardCode) {
+        if (deviceHash == null || deviceHash.isEmpty() || appId == null) {
+            return false;
+        }
+        if (activeDeviceRepository
+                .findByDeviceHashAndStatusAndExpireTimeAfterAndAppId(deviceHash, 1, LocalDateTime.now(), appId)
+                .isPresent()) {
+            return true;
+        }
+        if (cardCode != null && !cardCode.isEmpty()) {
+            Card card = cardRepository.findByCardCodeAndAppId(cardCode, appId).orElse(null);
+            return card != null && deviceHash.equals(card.getDeviceHash());
+        }
+        return false;
+    }
+
     // ========== Search & Pagination ==========
+
+    /** Whitelisted sort mapping shared by the list view and the keyword-search listing. */
+    public static Sort buildSort(String sort) {
+        if ("expire_asc".equals(sort)) {
+            return Sort.by(Sort.Direction.ASC, "expireTime");
+        }
+        if ("expire_desc".equals(sort)) {
+            return Sort.by(Sort.Direction.DESC, "expireTime");
+        }
+        return Sort.by(Sort.Direction.DESC, "createTime");
+    }
 
     public Page<Card> getCardsPaginated(int page, int size, Integer status, Integer appId,
                                          String cardType, String sort) {
-        Sort sortObj;
-        if ("expire_asc".equals(sort)) {
-            sortObj = Sort.by(Sort.Direction.ASC, "expireTime");
-        } else if ("expire_desc".equals(sort)) {
-            sortObj = Sort.by(Sort.Direction.DESC, "expireTime");
-        } else {
-            sortObj = Sort.by(Sort.Direction.DESC, "createTime");
-        }
+        Sort sortObj = buildSort(sort);
 
         Pageable pageable = PageRequest.of(page, size, sortObj);
 
@@ -385,8 +412,9 @@ public class CardService {
         return cardRepository.searchByKeyword(toLikePattern(keyword));
     }
 
-    public Page<Card> searchCardsPaged(String keyword, Pageable pageable) {
-        return cardRepository.searchByKeywordPaged(toLikePattern(keyword), pageable);
+    public Page<Card> searchCardsPaged(String keyword, Integer status, Integer appId, String cardType,
+                                       Pageable pageable) {
+        return cardRepository.searchByKeywordPaged(toLikePattern(keyword), status, appId, cardType, pageable);
     }
 
     /**

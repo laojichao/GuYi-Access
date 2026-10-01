@@ -16,4 +16,11 @@ public class Admin {
 
     @Column(name = "password_hash", nullable = false, length = 255)
     private String passwordHash;
+
+    /**
+     * Revocation counter embedded in every issued JWT. Bumping it (logout, password change)
+     * invalidates all tokens minted with an older value. Legacy rows may be NULL, read as 0.
+     */
+    @Column(name = "token_version")
+    private Integer tokenVersion = 0;
 }

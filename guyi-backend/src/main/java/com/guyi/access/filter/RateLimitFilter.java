@@ -1,6 +1,7 @@
 package com.guyi.access.filter;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.guyi.access.util.ClientIpUtil;
 import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -43,10 +44,13 @@ public class RateLimitFilter implements Filter {
 
         boolean isLogin = "/api/auth/login".equals(path);
         boolean isVerify = "/api/verify".equals(path);
-        if (isLogin || isVerify) {
+        // The install endpoint stays open until the first administrator exists, so it gets the
+        // strict limit as well - it was previously unlimited.
+        boolean isInstall = "/api/admin/install".equals(path);
+        if (isLogin || isVerify || isInstall) {
             String clientIp = getClientIp(httpReq);
             String currentMinute = MINUTE_FMT.format(LocalDateTime.now());
-            int limit = isLogin ? loginMaxRequests : maxRequests;
+            int limit = (isLogin || isInstall) ? loginMaxRequests : maxRequests;
 
             RateEntry entry = rateMap.compute(clientIp, (key, existing) -> {
                 if (existing == null || !existing.minute.equals(currentMinute)) {
@@ -86,17 +90,7 @@ public class RateLimitFilter implements Filter {
     }
 
     private String getClientIp(HttpServletRequest request) {
-        if (trustProxy) {
-            String ip = request.getHeader("X-Forwarded-For");
-            if (ip != null && !ip.isEmpty() && !"unknown".equalsIgnoreCase(ip)) {
-                return ip.split(",")[0].trim();
-            }
-            ip = request.getHeader("X-Real-IP");
-            if (ip != null && !ip.isEmpty() && !"unknown".equalsIgnoreCase(ip)) {
-                return ip;
-            }
-        }
-        return request.getRemoteAddr();
+        return ClientIpUtil.resolve(request, trustProxy);
     }
 
     private static class RateEntry {

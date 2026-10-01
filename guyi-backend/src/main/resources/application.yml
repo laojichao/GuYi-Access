@@ -3,6 +3,9 @@ server:
 
 spring:
   datasource:
+    # Local-development default: plain TCP to localhost. In production ALWAYS override DB_URL with
+    # TLS enabled (useSSL=true&requireSSL=true without allowPublicKeyRetrieval) - the JDBC link
+    # carries the DB password and every card record.
     url: ${DB_URL:jdbc:mysql://localhost:3306/guyi_access?useUnicode=true&characterEncoding=utf8mb4&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
@@ -32,11 +35,27 @@ app:
     expiration: 259200000  # 3 days in milliseconds
   admin:
     default-username: GuYi
+  # 可选：设置后，安装接口必须携带 install_token 才能创建管理员（留空则沿用旧行为，仅靠"先到先得"）。
+  # 建议在公网部署时设置，避免实例刚上线就被他人抢先完成安装。
+  install-token: ${INSTALL_TOKEN:}
   api-token: ${API_TOKEN}
+  # The window is a fixed calendar minute (matching the legacy PHP behaviour): there is no
+  # configurable window length, so do not re-add a window-seconds key that nothing reads.
   rate-limit:
     max-requests: 60
     login-max-requests: 5
-    window-seconds: 60
   cors:
     allowed-origins: ${CORS_ORIGINS:http://localhost:5173}
   trust-proxy: ${TRUST_PROXY:false}
+  login:
+    # 连续失败达到该次数后，按「用户名 + 客户端 IP」锁定一段时间；
+    # 按 IP 锁定可防止攻击者用错误密码把唯一管理员账号锁死（自伤型拒绝服务）。
+    max-failed-attempts: 5
+    lock-minutes: 15
+  maintenance:
+    # false 时两个定时任务都只跳过执行（不影响接口调用）
+    enabled: true
+    # 过期设备会话失活（非破坏性），默认每 10 分钟
+    device-cleanup-cron: "0 */10 * * * *"
+    # 过期卡密清除（破坏性：会删除记录），仅在系统设置 auto_clean_expired_cards=1 时执行，默认每小时
+    expired-card-purge-cron: "0 30 * * * *"

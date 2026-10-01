@@ -12,6 +12,8 @@ public interface ApplicationRepository extends JpaRepository<Application, Intege
 
     boolean existsByAppNameAndIdNot(String appName, Integer id);
 
+    boolean existsByAppName(String appName);
+
     @Query("SELECT a, (SELECT COUNT(c) FROM Card c WHERE c.appId = a.id) as cardCount FROM Application a ORDER BY a.createTime DESC")
     List<Object[]> findAllWithCardCount();
 

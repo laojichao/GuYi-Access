@@ -98,4 +98,43 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!--
+            Deployment Option A: bake the built Vue app into the jar so one artifact serves both the
+            UI and the API. Build the frontend first, then:
+                cd guyi-frontend && npm install && npm run build
+                cd ../guyi-backend && mvn -Pwith-frontend -DskipTests package
+            The frontend dist/ directory must exist before activating this profile.
+        -->
+        <profile>
+            <id>with-frontend</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-resources-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>copy-frontend-dist</id>
+                                <phase>prepare-package</phase>
+                                <goals>
+                                    <goal>copy-resources</goal>
+                                </goals>
+                                <configuration>
+                                    <outputDirectory>${project.build.outputDirectory}/static</outputDirectory>
+                                    <resources>
+                                        <resource>
+                                            <directory>${project.basedir}/../guyi-frontend/dist</directory>
+                                            <filtering>false</filtering>
+                                        </resource>
+                                    </resources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

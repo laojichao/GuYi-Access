@@ -21,7 +21,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<?> handleIllegalArgument(IllegalArgumentException e) {
-        return ResponseEntity.ok(ApiResponse.error(400, e.getMessage()));
+        // IllegalArgumentException covers NumberFormatException and library internals alike, so the
+        // raw message is logged rather than echoed (it can leak implementation detail, or be null and
+        // then vanish entirely under @JsonInclude(NON_NULL)).
+        log.warn("Illegal argument: {}", e.getMessage());
+        return ResponseEntity.ok(ApiResponse.error(400, "请求参数格式错误"));
     }
 
     // Expected business rule violations: surface the real message to the client
@@ -33,7 +37,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<?> handleRuntimeException(RuntimeException e) {
-        log.warn("Runtime exception: {}", e.getMessage());
+        // Keep the stack trace: logged as a message alone, an NPE or SQL failure is undiagnosable.
+        log.warn("Runtime exception", e);
         return ResponseEntity.ok(ApiResponse.error(400, "请求处理失败"));
     }
 

@@ -35,6 +35,9 @@ public interface CardRepository extends JpaRepository<Card, Integer> {
 
     long countByStatusAndAppId(Integer status, Integer appId);
 
+    /** Dashboard "expired" metric: activated cards whose expiry has already passed. */
+    long countByStatusAndExpireTimeBefore(Integer status, LocalDateTime expireTime);
+
     long countByAppId(Integer appId);
 
     @Query("SELECT c.cardType, COUNT(c) FROM Card c WHERE c.appId > 0 GROUP BY c.cardType")
@@ -66,9 +69,18 @@ public interface CardRepository extends JpaRepository<Card, Integer> {
            "(c.cardCode LIKE :kw ESCAPE '!' OR c.notes LIKE :kw ESCAPE '!' OR c.deviceHash LIKE :kw ESCAPE '!' OR a.appName LIKE :kw ESCAPE '!' OR c.cardType LIKE :kw ESCAPE '!')")
     List<Card> searchByKeyword(@Param("kw") String kw);
 
-    @Query("SELECT c FROM Card c JOIN Application a ON c.appId = a.id WHERE c.appId > 0 AND " +
+    /**
+     * Keyword search honouring the same filters as the plain list view. Absent filters are bound as
+     * sentinels (status = -1, appId = 0, cardType = "") so the query never receives an untyped NULL.
+     */
+    @Query("SELECT c FROM Card c JOIN Application a ON c.appId = a.id WHERE c.appId > 0 " +
+           "AND (:status < 0 OR c.status = :status) " +
+           "AND (:appId <= 0 OR c.appId = :appId) " +
+           "AND (:cardType = '' OR c.cardType = :cardType) AND " +
            "(c.cardCode LIKE :kw ESCAPE '!' OR c.notes LIKE :kw ESCAPE '!' OR c.deviceHash LIKE :kw ESCAPE '!' OR a.appName LIKE :kw ESCAPE '!' OR c.cardType LIKE :kw ESCAPE '!')")
-    Page<Card> searchByKeywordPaged(@Param("kw") String kw, Pageable pageable);
+    Page<Card> searchByKeywordPaged(@Param("kw") String kw, @Param("status") Integer status,
+                                    @Param("appId") Integer appId, @Param("cardType") String cardType,
+                                    Pageable pageable);
 
     @Query("SELECT c FROM Card c WHERE c.status = 1 AND c.expireTime < :now")
     List<Card> findExpiredCards(@Param("now") LocalDateTime now);

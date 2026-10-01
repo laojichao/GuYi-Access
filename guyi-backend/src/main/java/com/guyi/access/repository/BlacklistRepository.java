@@ -9,5 +9,8 @@ public interface BlacklistRepository extends JpaRepository<Blacklist, Integer> {
 
     Optional<Blacklist> findByTypeAndValue(String type, String value);
 
+    /** The unique constraint is on value alone, so de-duplication must use value alone too. */
+    Optional<Blacklist> findByValue(String value);
+
     List<Blacklist> findAllByOrderByCreateTimeDesc();
 }

@@ -10,6 +10,7 @@ import com.guyi.access.service.BlacklistService;
 import com.guyi.access.service.CardService;
 import com.guyi.access.service.SystemService;
 import com.guyi.access.util.AesUtil;
+import com.guyi.access.util.ClientIpUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
@@ -51,6 +52,20 @@ public class VerifyController {
         String userAgent = httpRequest.getHeader("User-Agent");
         String action = request.getAction() != null ? request.getAction() : "verify";
 
+        // Length guards matching the column sizes: over-long values would otherwise reach the
+        // database and come back as a generic 500.
+        String rawCard = request.getEffectiveCardCode();
+        if (rawCard != null && rawCard.length() > 50) {
+            return ok(ApiResponse.error(400, "卡密格式无效"));
+        }
+        String rawDevice = request.getEffectiveDevice();
+        if (rawDevice != null && rawDevice.length() > 100) {
+            return ok(ApiResponse.error(400, "设备特征码格式无效"));
+        }
+        if (request.getCustomData() != null && request.getCustomData().length() > 60000) {
+            return ok(ApiResponse.error(400, "custom_data 过长"));
+        }
+
         try {
             // Admin API actions
             if ("generate".equals(action) || "ban".equals(action) || "unban".equals(action)
@@ -58,7 +73,9 @@ public class VerifyController {
                 return handleAdminAction(request, clientIp);
             }
 
-            // Blacklist action
+            // Blacklist action. This branch used to run before any app_key check, so an anonymous
+            // caller could permanently blacklist an arbitrary device hash across EVERY application.
+            // It now requires a valid app_key plus a device the caller provably owns.
             if ("ban_machine".equals(action) || "blacklist".equals(action)) {
                 String device = request.getEffectiveDevice();
                 if (device == null || device.isEmpty()) {
@@ -66,6 +83,13 @@ public class VerifyController {
                 }
                 if (device.length() > 100) {
                     return ok(ApiResponse.error(400, "设备特征码格式无效"));
+                }
+                Application banApp = applicationService.getAppByKey(request.getAppKey());
+                if (banApp == null || banApp.getStatus() == 0) {
+                    return ok(ApiResponse.error(403, "无权拉黑：缺少有效的 AppKey"));
+                }
+                if (!cardService.isDeviceOwnedByApp(device, banApp.getId(), request.getEffectiveCardCode())) {
+                    return ok(ApiResponse.error(403, "无权拉黑该设备：请先完成一次有效验证"));
                 }
                 blacklistService.addDeviceAndIpBlacklist(device, clientIp, "触发客户端安全防御策略");
                 return ok(ApiResponse.success("设备与所在IP已被系统成功拉黑"));
@@ -184,11 +208,13 @@ public class VerifyController {
                 String type = request.getType() != null ? request.getType() : "day";
                 String pre = request.getPre() != null ? request.getPre() : "";
                 String note = request.getNote() != null ? request.getNote() : "API接口批量生卡";
+                // Absent or non-positive custom_hours means "standard card type" (matching the PHP
+                // backend), so only an over-sized value is rejected; a positive value wins.
                 Double customHours = request.getCustomHours();
-                if (customHours != null && (customHours <= 0 || customHours > 8760)) {
-                    return ok(ApiResponse.error(400, "生成失败：自定义时长须在 0-8760 小时之间"));
+                if (customHours != null && customHours > 8760) {
+                    return ok(ApiResponse.error(400, "生成失败：自定义时长不能超过 8760 小时"));
                 }
-                int customDuration = customHours != null ? (int) (customHours * 3600) : 0;
+                int customDuration = customHours != null && customHours > 0 ? (int) (customHours * 3600) : 0;
 
                 List<String> codes = cardService.generateCards(num, type, pre, note, appId, customDuration);
                 String cardStr = String.join("\n", codes);
@@ -270,17 +296,7 @@ public class VerifyController {
     private boolean trustProxy;
 
     private String getClientIp(HttpServletRequest request) {
-        if (trustProxy) {
-            String ip = request.getHeader("X-Forwarded-For");
-            if (ip != null && !ip.isEmpty() && !"unknown".equalsIgnoreCase(ip)) {
-                return ip.split(",")[0].trim();
-            }
-            ip = request.getHeader("X-Real-IP");
-            if (ip != null && !ip.isEmpty() && !"unknown".equalsIgnoreCase(ip)) {
-                return ip;
-            }
-        }
-        return request.getRemoteAddr();
+        return ClientIpUtil.resolve(request, trustProxy);
     }
 
     private String md5(String input) {
