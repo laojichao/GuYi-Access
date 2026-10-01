@@ -22,7 +22,7 @@ api.interceptors.response.use(
   response => {
     if (response.data && response.data.code === 401) {
       const authStore = useAuthStore()
-      authStore.logout()
+      authStore.clearLocal()
       router.push('/login')
     }
     return response
@@ -30,7 +30,7 @@ api.interceptors.response.use(
   error => {
     if (error.response && error.response.status === 401) {
       const authStore = useAuthStore()
-      authStore.logout()
+      authStore.clearLocal()
       router.push('/login')
     }
     return Promise.reject(error)
@@ -38,3 +38,8 @@ api.interceptors.response.use(
 )
 
 export default api
+
+/** Public liveness probe (used on startup to detect an uninstalled instance). */
+export const healthApi = {
+  check: () => api.get('/api/health')
+}

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import api from '../api'
+import { adminApi } from '../api/admin'
 
 const cards = ref([])
 const apps = ref([])
@@ -20,8 +20,8 @@ const cardTypes = ref({})
 onMounted(async () => {
   try {
     const [appsRes, typesRes] = await Promise.all([
-      api.get('/api/admin/apps'),
-      api.get('/api/admin/card-types')
+      adminApi.getApps(),
+      adminApi.getCardTypes()
     ])
     if (appsRes.data.code === 200) apps.value = appsRes.data.data
     if (typesRes.data.code === 200) cardTypes.value = typesRes.data.data
@@ -40,7 +40,7 @@ async function loadCards() {
     if (typeFilter.value) params.type = typeFilter.value
     if (searchQuery.value) params.q = searchQuery.value
 
-    const res = await api.get('/api/admin/cards', { params })
+    const res = await adminApi.getCards(params)
     if (res.data.code === 200) {
       cards.value = res.data.data.cards || []
       total.value = res.data.data.total || 0
@@ -63,10 +63,10 @@ async function action(act, id) {
   if (!confirm('确定操作？')) return
   try {
     let res
-    if (act === 'delete') res = await api.delete(`/api/admin/cards/${id}`)
-    else if (act === 'ban') res = await api.put(`/api/admin/cards/${id}/status`, { status: 2 })
-    else if (act === 'unban') res = await api.put(`/api/admin/cards/${id}/status`, { status: 1 })
-    else if (act === 'unbind') res = await api.put(`/api/admin/cards/${id}/unbind`)
+    if (act === 'delete') res = await adminApi.deleteCard(id)
+    else if (act === 'ban') res = await adminApi.setCardStatus(id, 2)
+    else if (act === 'unban') res = await adminApi.setCardStatus(id, 1)
+    else if (act === 'unbind') res = await adminApi.unbindCard(id)
     if (res?.data?.code === 200) loadCards()
     else alert(res?.data?.msg || '操作失败')
   } catch (e) { alert('操作失败') }
@@ -88,30 +88,30 @@ async function batchAction(act) {
   if (!confirm('确定执行批量操作？')) return
   try {
     let res
-    if (act === 'delete') res = await api.post('/api/admin/cards/batch-delete', { ids: selectedIds.value })
-    else if (act === 'unbind') res = await api.post('/api/admin/cards/batch-unbind', { ids: selectedIds.value })
+    if (act === 'delete') res = await adminApi.batchDelete(selectedIds.value)
+    else if (act === 'unbind') res = await adminApi.batchUnbind(selectedIds.value)
     else if (act === 'add-time') {
       const hours = prompt('增加小时数', '24')
       if (!hours || isNaN(hours)) return
-      res = await api.post('/api/admin/cards/batch-add-time', { ids: selectedIds.value, hours: parseFloat(hours) })
+      res = await adminApi.batchAddTime(selectedIds.value, parseFloat(hours))
     }
     else if (act === 'sub-time') {
       const hours = prompt('扣除小时数', '24')
       if (!hours || isNaN(hours)) return
-      res = await api.post('/api/admin/cards/batch-sub-time', { ids: selectedIds.value, hours: parseFloat(hours) })
+      res = await adminApi.batchSubTime(selectedIds.value, parseFloat(hours))
     }
     else if (act === 'global-compensate') {
       const hours = prompt('为所有在用卡密统一补偿小时数:', '12')
       if (!hours || isNaN(hours)) return
       const body = { hours: parseFloat(hours) }
       if (appFilter.value) body.app_id = parseInt(appFilter.value)
-      res = await api.post('/api/admin/cards/global-compensate', body)
+      res = await adminApi.globalCompensate(body)
     }
     else if (act === 'clean-expired') {
-      res = await api.post('/api/admin/cards/clean-expired')
+      res = await adminApi.cleanExpired()
     }
     else if (act === 'export') {
-      res = await api.post('/api/admin/cards/batch-export', { ids: selectedIds.value }, { responseType: 'blob' })
+      res = await adminApi.exportCards(selectedIds.value)
       if (res.status === 200) {
         const url = URL.createObjectURL(res.data)
         const a = document.createElement('a'); a.href = url; a.download = `cards_export_${Date.now()}.txt`; a.click()

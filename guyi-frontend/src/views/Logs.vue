@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import api from '../api'
+import { adminApi } from '../api/admin'
 
 const logs = ref([])
 const total = ref(0)
@@ -13,7 +13,7 @@ onMounted(loadLogs)
 async function loadLogs() {
   loading.value = true
   try {
-    const res = await api.get('/api/admin/logs', { params: { page: page.value - 1, limit: limit.value } })
+    const res = await adminApi.getLogs({ page: page.value - 1, limit: limit.value })
     if (res.data.code === 200) {
       const data = res.data.data
       logs.value = data?.content || data || []

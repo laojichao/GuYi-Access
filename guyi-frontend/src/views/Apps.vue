@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import api from '../api'
+import { adminApi } from '../api/admin'
 
 const apps = ref([])
 const loading = ref(true)
@@ -46,7 +46,7 @@ async function copyText(text, key) {
 async function loadApps() {
   loading.value = true
   try {
-    const res = await api.get('/api/admin/apps')
+    const res = await adminApi.getApps()
     if (res.data.code === 200) apps.value = res.data.data
   } catch (e) { console.error(e) }
   finally { loading.value = false }
@@ -54,7 +54,7 @@ async function loadApps() {
 
 async function createApp() {
   try {
-    const res = await api.post('/api/admin/apps', createForm.value)
+    const res = await adminApi.createApp(createForm.value)
     if (res.data.code === 200) { createForm.value = { app_name: '', app_version: '', app_notes: '' }; loadApps() }
     else alert(res.data.msg)
   } catch (e) { alert('创建失败') }
@@ -67,21 +67,21 @@ function openEdit(app) {
 
 async function saveEdit() {
   try {
-    const res = await api.put(`/api/admin/apps/${editForm.value.id}`, editForm.value)
+    const res = await adminApi.updateApp(editForm.value.id, editForm.value)
     if (res.data.code === 200) { editModal.value = false; loadApps() }
     else alert(res.data.msg)
   } catch (e) { alert('更新失败') }
 }
 
 async function toggleApp(id) {
-  await api.put(`/api/admin/apps/${id}/toggle`)
+  await adminApi.toggleApp(id)
   loadApps()
 }
 
 async function deleteApp(id) {
   if (!confirm('确定删除？')) return
   try {
-    const res = await api.delete(`/api/admin/apps/${id}`)
+    const res = await adminApi.deleteApp(id)
     if (res.data.code === 200) loadApps()
     else alert(res.data.msg)
   } catch (e) { alert(e.response?.data?.msg || '删除失败') }
@@ -101,7 +101,7 @@ async function openVars(app) {
 async function loadVars() {
   varsLoading.value = true
   try {
-    const res = await api.get(`/api/admin/apps/${varsAppId.value}/variables`)
+    const res = await adminApi.getVariables(varsAppId.value)
     if (res.data.code === 200) vars.value = res.data.data || []
   } catch (e) { console.error(e) }
   finally { varsLoading.value = false }
@@ -110,7 +110,7 @@ async function loadVars() {
 async function addVar() {
   if (!varForm.value.key.trim()) { alert('变量名不能为空'); return }
   try {
-    const res = await api.post(`/api/admin/apps/${varsAppId.value}/variables`, varForm.value)
+    const res = await adminApi.createVariable(varsAppId.value, varForm.value)
     if (res.data.code === 200) { varForm.value = { key: '', value: '', is_public: 0 }; loadVars() }
     else alert(res.data.msg)
   } catch (e) { alert('添加失败') }
@@ -123,7 +123,7 @@ function startEditVar(v) {
 
 async function saveEditVar() {
   try {
-    const res = await api.put(`/api/admin/variables/${editingVarId.value}`, editingVarForm.value)
+    const res = await adminApi.updateVariable(editingVarId.value, editingVarForm.value)
     if (res.data.code === 200) { editingVarId.value = null; loadVars() }
     else alert(res.data.msg)
   } catch (e) { alert('更新失败') }
@@ -136,7 +136,7 @@ function cancelEditVar() {
 async function deleteVar(id) {
   if (!confirm('确定删除该变量？')) return
   try {
-    const res = await api.delete(`/api/admin/variables/${id}`)
+    const res = await adminApi.deleteVariable(id)
     if (res.data.code === 200) loadVars()
     else alert(res.data.msg)
   } catch (e) { alert('删除失败') }

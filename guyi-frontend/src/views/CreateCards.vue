@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import api from '../api'
+import { adminApi } from '../api/admin'
 
 const apps = ref([])
 const form = ref({ app_id: '', type: 'day', num: 10, pre: '', note: '', custom_hours: 24 })
@@ -19,8 +19,8 @@ function formatDuration(seconds) {
 
 onMounted(async () => {
   const [appsRes, typesRes] = await Promise.all([
-    api.get('/api/admin/apps'),
-    api.get('/api/admin/card-types')
+    adminApi.getApps(),
+    adminApi.getCardTypes()
   ])
   if (appsRes.data.code === 200) apps.value = appsRes.data.data.filter(a => a.status === 1)
   if (typesRes.data.code === 200) {
@@ -38,7 +38,7 @@ async function generate(autoExport = false) {
   try {
     const payload = { ...form.value }
     if (payload.type !== 'custom') delete payload.custom_hours
-    const res = await api.post('/api/admin/cards/generate', payload)
+    const res = await adminApi.generateCards(payload)
     if (res.data.code === 200) {
       result.value = res.data.data.cards
       if (autoExport && result.value) {

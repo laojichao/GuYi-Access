@@ -9,6 +9,12 @@ const routes = [
     meta: { requiresAuth: false }
   },
   {
+    path: '/install',
+    name: 'Install',
+    component: () => import('../views/Install.vue'),
+    meta: { requiresAuth: false }
+  },
+  {
     path: '/',
     redirect: '/dashboard'
   },

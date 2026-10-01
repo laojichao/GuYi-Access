@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import api from '../api'
+import { adminApi } from '../api/admin'
 
 const blacklist = ref([])
 const form = ref({ type: 'device', value: '', reason: '' })
@@ -11,7 +11,7 @@ onMounted(loadBlacklist)
 async function loadBlacklist() {
   loading.value = true
   try {
-    const res = await api.get('/api/admin/blacklist')
+    const res = await adminApi.getBlacklist()
     if (res.data.code === 200) blacklist.value = res.data.data
   } catch (e) {}
   finally { loading.value = false }
@@ -20,7 +20,7 @@ async function loadBlacklist() {
 async function addBlacklist() {
   if (!form.value.value.trim()) { alert('封禁目标不能为空'); return }
   try {
-    const res = await api.post('/api/admin/blacklist', form.value)
+    const res = await adminApi.addBlacklist(form.value)
     if (res.data.code === 200) { form.value = { type: 'device', value: '', reason: '' }; loadBlacklist() }
     else alert(res.data.msg)
   } catch (e) { alert('添加失败') }
@@ -28,7 +28,7 @@ async function addBlacklist() {
 
 async function removeBlacklist(id) {
   if (!confirm('确定解除封禁？')) return
-  await api.delete(`/api/admin/blacklist/${id}`)
+  await adminApi.deleteBlacklist(id)
   loadBlacklist()
 }
 </script>

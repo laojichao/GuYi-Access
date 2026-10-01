@@ -2,6 +2,7 @@
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
+import { healthApi } from './api'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,9 +22,22 @@ const navItems = [
   { path: '/about', label: '关于系统', icon: 'ph-info' },
 ]
 
-onMounted(() => {
+onMounted(async () => {
   if (authStore.isLoggedIn) {
     authStore.verifyToken()
+    return
+  }
+  // First run: the backend reports installed=false until an administrator exists, so send the
+  // operator to the install wizard. Only when the database is reachable (status UP) - a DOWN
+  // database must not be mistaken for "not installed".
+  try {
+    const res = await healthApi.check()
+    const health = res.data?.data
+    if (health && health.status === 'UP' && health.installed === false && route.path !== '/install') {
+      router.push('/install')
+    }
+  } catch (e) {
+    // backend unreachable: stay on the current page and let the normal error handling surface it
   }
 })
 

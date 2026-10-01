@@ -1,6 +1,9 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import api from '../api'
+import { adminApi } from '../api/admin'
+import { useAuthStore } from '../stores/auth'
+
+const authStore = useAuthStore()
 
 const settings = ref({ bg_blur: '0', api_encrypt: '1' })
 const passwordForm = ref({ old_password: '', new_password: '', confirm_password: '' })
@@ -8,7 +11,7 @@ const loading = ref(true)
 
 onMounted(async () => {
   try {
-    const res = await api.get('/api/admin/settings')
+    const res = await adminApi.getSettings()
     if (res.data.code === 200 && res.data.data) settings.value = { ...settings.value, ...res.data.data }
   } catch (e) {}
   finally { loading.value = false }
@@ -16,7 +19,7 @@ onMounted(async () => {
 
 async function saveSettings() {
   try {
-    const res = await api.post('/api/admin/settings', settings.value)
+    const res = await adminApi.saveSettings(settings.value)
     if (res.data.code === 200) alert('系统配置已保存')
     else alert(res.data.msg)
   } catch (e) { alert('保存失败') }
@@ -30,15 +33,21 @@ async function updatePassword() {
     alert('两次输入的密码不一致'); return
   }
   try {
-    const res = await api.put('/api/admin/password', passwordForm.value)
-    if (res.data.code === 200) { alert('密码已更新'); passwordForm.value = { old_password: '', new_password: '', confirm_password: '' } }
+    const res = await adminApi.updatePassword(passwordForm.value)
+    if (res.data.code === 200) {
+      // The backend revoked every old token and returned a fresh one: store it, otherwise the very
+      // next request would be rejected with 401.
+      if (res.data.data && res.data.data.token) authStore.setToken(res.data.data.token)
+      alert('密码已更新，其他已登录会话已失效')
+      passwordForm.value = { old_password: '', new_password: '', confirm_password: '' }
+    }
     else alert(res.data.msg)
   } catch (e) { alert('更新失败') }
 }
 
 async function exportData() {
   try {
-    const res = await api.get('/api/admin/system/export', { responseType: 'blob' })
+    const res = await adminApi.exportSystem()
     const url = URL.createObjectURL(res.data)
     const a = document.createElement('a')
     a.href = url
@@ -55,7 +64,7 @@ async function importData(event) {
   const formData = new FormData()
   formData.append('file', file)
   try {
-    const res = await api.post('/api/admin/system/import', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+    const res = await adminApi.importSystem(formData)
     if (res.data.code === 200) alert(res.data.msg)
     else alert(res.data.msg)
   } catch (e) { alert('导入失败') }
