@@ -287,8 +287,10 @@ public class CardService {
     @Transactional
     public void globalCompensate(double hours, Integer appId) {
         long seconds = (long) (hours * 3600);
-        cardRepository.globalAddTime(seconds, appId);
-        activeDeviceRepository.globalAddTime(seconds, appId);
+        // 0 is the "all applications" sentinel understood by both queries
+        int appFilter = appId == null ? 0 : appId;
+        cardRepository.globalAddTime(seconds, appFilter);
+        activeDeviceRepository.globalAddTime(seconds, appFilter);
     }
 
     // ========== Card Status ==========

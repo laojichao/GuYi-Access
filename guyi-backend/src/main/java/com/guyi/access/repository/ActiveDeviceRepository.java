@@ -32,15 +32,20 @@ public interface ActiveDeviceRepository extends JpaRepository<ActiveDevice, Inte
     @Query("UPDATE ActiveDevice d SET d.status = 0 WHERE d.status = 1 AND d.expireTime <= CURRENT_TIMESTAMP")
     int deactivateExpiredDevices();
 
+    // HQL timestampadd instead of MySQL-only DATE_ADD/INTERVAL (see CardRepository for the rationale)
     @Modifying
-    @Query(value = "UPDATE active_devices SET expire_time = DATE_ADD(expire_time, INTERVAL :seconds SECOND) WHERE card_code IN :cardCodes", nativeQuery = true)
+    @Query("UPDATE ActiveDevice d SET d.expireTime = timestampadd(SECOND, :seconds, d.expireTime) "
+         + "WHERE d.cardCode IN :cardCodes")
     int addTimeByCardCodes(@Param("cardCodes") List<String> cardCodes, @Param("seconds") long seconds);
 
     @Modifying
-    @Query(value = "UPDATE active_devices SET expire_time = DATE_SUB(expire_time, INTERVAL :seconds SECOND) WHERE card_code IN :cardCodes", nativeQuery = true)
+    @Query("UPDATE ActiveDevice d SET d.expireTime = timestampadd(SECOND, (0 - :seconds), d.expireTime) "
+         + "WHERE d.cardCode IN :cardCodes")
     int subTimeByCardCodes(@Param("cardCodes") List<String> cardCodes, @Param("seconds") long seconds);
 
+    /** {@code appId <= 0} means "every application". */
     @Modifying
-    @Query(value = "UPDATE active_devices SET expire_time = DATE_ADD(expire_time, INTERVAL :seconds SECOND) WHERE status = 1 AND expire_time > NOW() AND (:appId IS NULL OR app_id = :appId)", nativeQuery = true)
-    int globalAddTime(@Param("seconds") long seconds, @Param("appId") Integer appId);
+    @Query("UPDATE ActiveDevice d SET d.expireTime = timestampadd(SECOND, :seconds, d.expireTime) "
+         + "WHERE d.status = 1 AND d.expireTime > CURRENT_TIMESTAMP AND (:appId <= 0 OR d.appId = :appId)")
+    int globalAddTime(@Param("seconds") long seconds, @Param("appId") int appId);
 }

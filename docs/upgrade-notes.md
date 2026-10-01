@@ -123,6 +123,21 @@
 
 ---
 
+## 17. 端到端实测后追加的修复（2026-10）
+
+首次真正启动应用（`EndToEndApiTest`，20 项测试）后修复的问题：
+
+| 问题 | 影响与修复 |
+|---|---|
+| **首装接口无法使用** | `InstallRequest` 缺少 `@JsonProperty("admin_password")`，Jackson 不会把 `admin_password` 绑定到 `adminPassword`，首装**必然**返回「管理员密码长度不能少于6位」。已修正（并保留驼峰别名 `adminPassword`/`installToken`）。 |
+| **未知接口返回 200 + 「服务器内部错误」** | 兜底的 `Exception` 处理器吞掉了 Spring 的 `NoResourceFoundException`，把 404 报成 500 且 HTTP 状态为 200。现 404/405/415/413 返回真实状态码 + 同一 JSON 信封；业务错误仍为 200 + body `code`。 |
+| **单 JAR 模式下 `/api/**` 被 SPA 回退劫持** | 启用 Option A 后，任何无扩展名的未知路径（含 `/api/...`）都会返回前端 `index.html` 且状态 200，API 客户端会拿到 HTML。现 `/api/`、`/error` 前缀不参与 SPA 回退。 |
+| **批量加减时长的 SQL 不可移植、无法测试** | 6 条 MySQL 原生 SQL（`DATE_ADD/INTERVAL`）改为 HQL `timestampadd`，MySQL 与 H2 行为一致，现已被测试覆盖。`globalAddTime` 的「全部应用」由 `NULL` 参数改为 `<= 0` 哨兵，避免可空参数比较。 |
+| **JDBC 字符集参数** | `characterEncoding=utf8mb4` 改为 `UTF-8`（`utf8mb4` 是 MySQL 字符集名，驱动的 `characterEncoding` 需要 Java 字符集名）。 |
+| **进程时区未固定** | 新增 `APP_TIMEZONE`（默认 `Asia/Shanghai`）在启动时设置 JVM 默认时区，与 JDBC `serverTimezone`、Jackson 时区保持一致，消除「卡密到期用 JVM 时间、设备清理用数据库时间」跨时区错位。 |
+
+---
+
 ## 部署前检查清单
 
 1. 配置 `JWT_SECRET`（≥ 32 字节）、`DB_USERNAME`、`DB_PASSWORD`、`API_TOKEN`（缺失则启动失败）。

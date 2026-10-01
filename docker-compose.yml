@@ -35,7 +35,7 @@ services:
       mysql:
         condition: service_healthy
     environment:
-      DB_URL: "jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-guyi_access}?useUnicode=true&characterEncoding=utf8mb4&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true"
+      DB_URL: "jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-guyi_access}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true"
       DB_USERNAME: ${MYSQL_USER:-guyi}
       DB_PASSWORD: ${MYSQL_PASSWORD:?请在 .env 中设置 MYSQL_PASSWORD}
       # 必填：少于 32 字节会导致后端拒绝启动

@@ -35,6 +35,7 @@ docker-compose.yml  MySQL + 后端 + 前端（Nginx）一键编排
 | `INSTALL_TOKEN` | 否 | 空 | 设置后，安装接口必须携带 `install_token`；公网部署强烈建议设置 |
 | `CORS_ORIGINS` | 否 | `http://localhost:5173` | 允许的前端来源，逗号分隔 |
 | `TRUST_PROXY` | 否 | `false` | 置于 Nginx 等反向代理之后时设为 `true`（限流与拉黑按 `X-Forwarded-For` 末段取真实 IP） |
+| `APP_TIMEZONE` | 否 | `Asia/Shanghai` | 进程默认时区。卡密到期用 JVM 时间、设备清理/看板用数据库时间，两者必须同区，否则容器跑 UTC 时会出现「一张卡在一个查询里有效、在另一个查询里已过期」 |
 
 可选调优（`application.yml` 中已有默认值）：`app.rate-limit.max-requests`（60/分钟）、
 `app.rate-limit.login-max-requests`（5/分钟）、`app.login.max-failed-attempts`（5）、
@@ -72,7 +73,7 @@ cd guyi-frontend && npm install && npm run build
 ### 4.2 运行后端
 
 ```bash
-export DB_URL='jdbc:mysql://127.0.0.1:3306/guyi_access?useUnicode=true&characterEncoding=utf8mb4&serverTimezone=Asia/Shanghai&useSSL=true&requireSSL=true'
+export DB_URL='jdbc:mysql://127.0.0.1:3306/guyi_access?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=true&requireSSL=true'
 export DB_USERNAME=guyi
 export DB_PASSWORD='<db-password>'
 export JWT_SECRET="$(openssl rand -hex 32)"
@@ -167,6 +168,7 @@ curl -s -X POST http://127.0.0.1:8080/api/admin/install \
 | 请求返回 403 | 权限/业务拒绝（如 AppKey 无效、`ban_machine` 未携带 app_key）；与 401 语义不同 |
 | 登录返回 429 | 触发登录限流或账号锁定，等待窗口/锁定期结束 |
 | 生卡报「无效的卡密类型」 | 卡型必须是 hour/day/week/month/season/year，或改用自定义时长 |
+| 调用不存在的接口返回 404 | 正常。**传输层错误（404/405/415/413）返回真实 HTTP 状态码**；业务错误仍为 HTTP 200 + body 内 `code` 字段（管理端前端读该字段） |
 | 迁移导入后卡密归属异常 | 请使用修复后的版本；导入会重建 app_id 映射，导入前务必备份 |
 
 ## 8. 从 PHP 版迁移

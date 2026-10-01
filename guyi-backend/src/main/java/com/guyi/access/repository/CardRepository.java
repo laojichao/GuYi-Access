@@ -89,15 +89,21 @@ public interface CardRepository extends JpaRepository<Card, Integer> {
     @Query("UPDATE Card c SET c.deviceHash = NULL WHERE c.id IN :ids")
     int unbindByIds(@Param("ids") List<Integer> ids);
 
+    // HQL timestampadd instead of MySQL-only DATE_ADD/INTERVAL: same result on MySQL, and the
+    // behaviour is testable (and portable) instead of being locked to one dialect.
     @Modifying
-    @Query(value = "UPDATE cards SET expire_time = DATE_ADD(expire_time, INTERVAL :seconds SECOND) WHERE id IN :ids AND status = 1", nativeQuery = true)
+    @Query("UPDATE Card c SET c.expireTime = timestampadd(SECOND, :seconds, c.expireTime) "
+         + "WHERE c.id IN :ids AND c.status = 1")
     int addTimeByIds(@Param("ids") List<Integer> ids, @Param("seconds") long seconds);
 
     @Modifying
-    @Query(value = "UPDATE cards SET expire_time = DATE_SUB(expire_time, INTERVAL :seconds SECOND) WHERE id IN :ids AND status = 1", nativeQuery = true)
+    @Query("UPDATE Card c SET c.expireTime = timestampadd(SECOND, (0 - :seconds), c.expireTime) "
+         + "WHERE c.id IN :ids AND c.status = 1")
     int subTimeByIds(@Param("ids") List<Integer> ids, @Param("seconds") long seconds);
 
+    /** {@code appId <= 0} means "every application" - a sentinel avoids comparing a nullable param. */
     @Modifying
-    @Query(value = "UPDATE cards SET expire_time = DATE_ADD(expire_time, INTERVAL :seconds SECOND) WHERE status = 1 AND expire_time > NOW() AND (:appId IS NULL OR app_id = :appId)", nativeQuery = true)
-    int globalAddTime(@Param("seconds") long seconds, @Param("appId") Integer appId);
+    @Query("UPDATE Card c SET c.expireTime = timestampadd(SECOND, :seconds, c.expireTime) "
+         + "WHERE c.status = 1 AND c.expireTime > CURRENT_TIMESTAMP AND (:appId <= 0 OR c.appId = :appId)")
+    int globalAddTime(@Param("seconds") long seconds, @Param("appId") int appId);
 }

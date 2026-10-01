@@ -6,7 +6,9 @@ spring:
     # Local-development default: plain TCP to localhost. In production ALWAYS override DB_URL with
     # TLS enabled (useSSL=true&requireSSL=true without allowPublicKeyRetrieval) - the JDBC link
     # carries the DB password and every card record.
-    url: ${DB_URL:jdbc:mysql://localhost:3306/guyi_access?useUnicode=true&characterEncoding=utf8mb4&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    # characterEncoding takes a *Java* charset name: UTF-8 (Connector/J negotiates utf8mb4 for it).
+    # The previous utf8mb4 value is a MySQL charset name and may be rejected by the driver.
+    url: ${DB_URL:jdbc:mysql://localhost:3306/guyi_access?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
