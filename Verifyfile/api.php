@@ -78,12 +78,17 @@ try {
     if (in_array($action, ['generate', 'ban', 'unban', 'del_card', 'kick'])) {
         $api_token = isset($data['api_token']) ? trim($data['api_token']) : '';
         
-        // ----------------------------------------------------
-        // ⭐【请注意】您的专属管理员对接通信密钥在这里修改！
-        // ----------------------------------------------------
-        $admin_api_token = 'GuYiAdmin123'; 
-        
-        if ($api_token !== $admin_api_token) {
+        // 管理令牌不再硬编码：优先读环境变量 GUYI_ADMIN_API_TOKEN，其次读系统设置 admin_api_token；
+        // 两者都未配置时一律拒绝（fail closed），避免仓库内置凭据被任何人直接调用管理接口。
+        $admin_api_token = getenv('GUYI_ADMIN_API_TOKEN');
+        if ($admin_api_token === false || $admin_api_token === '') {
+            $admin_api_token = isset($sysConf['admin_api_token']) ? trim($sysConf['admin_api_token']) : '';
+        }
+        if ($admin_api_token === '') {
+            output_json(403, '管理接口未启用：请配置环境变量 GUYI_ADMIN_API_TOKEN 或系统设置 admin_api_token');
+        }
+
+        if (!hash_equals($admin_api_token, $api_token)) {
             output_json(403, '无权操作：对接通信密钥(api_token)错误或未提供！');
         }
 
@@ -186,14 +191,8 @@ try {
     if (empty($card_code)) output_json(400, '请输入卡密');
     if (empty($device)) $device = md5($_SERVER['REMOTE_ADDR']);
 
-    if ($card_code === '156440000') {
-        $variables = [];
-        if ($appInfo && isset($appInfo['id'])) {
-            $raw_vars = $db->getAppVariables($appInfo['id'], false);
-            foreach ($raw_vars as $v) $variables[$v['key_name']] = $v['value'];
-        }
-        output_json(200, 'OK', ['expire_time' => '2099-12-31 23:59:59', 'update' => $updateData, 'variables' => $variables], $app_key);
-    }
+    // 安全修复：此处原有硬编码的“万能卡密”旁路（对特定卡密直接返回 2099 年到期时间，绕过全部
+    // 校验与授权），已彻底移除。任何卡密都必须经过下方 verifyCard 的正常校验，请勿重新加入。
     
     $result = $db->verifyCard($card_code, $device, $app_key, $custom_data);
     
