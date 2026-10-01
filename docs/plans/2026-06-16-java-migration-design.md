@@ -177,3 +177,30 @@ Keep MySQL with identical schema. JPA auto-creates tables on first run.
 | cards.css | styles/glass.css (Vue component styles) |
 | Verifyfile/api.php | VerifyController.java |
 | Verifyfile/captcha.php | CaptchaController.java (optional, JWT may not need captcha) |
+
+---
+
+## 实施偏差记录（2026-10 更新）
+
+以下为实际实现与上文计划的差异，均为**已确认的取舍**，避免后续按原文验收时误判为缺失。
+
+| 项 | 计划 | 实际实现 | 说明 |
+|---|---|---|---|
+| Task 9 前端依赖 | Naive UI + @phosphor-icons/vue + chart.js | **chart.js + vue-chartjs 已引入**；Naive UI 未采用（改手写 CSS `styles/glass.css`），图标改用 CDN（`index.html` 引入 `@phosphor-icons/web`） | 保留原 PHP 版毛玻璃视觉；图表按计划用 Chart.js，组件库与图标包不引入以避免风格改造 |
+| Task 12 看板图表 | Chart.js 环形图 / 柱状图 | **已实现**：`Dashboard.vue` 用 Chart.js `Doughnut`（卡密类型分布，旁附图例与百分比）+ `Bar`（应用库存分布），并补充 `expired`/`banned` 统计卡 | 图表按原计划用 Chart.js；仅注册所需组件，且随看板路由懒加载 |
+| Task 12 公告面板 | 从远程 URL 拉取公告 | 未实现 | 远程地址未定义，公告改由「云变量」下发 |
+| Task 10 API 模块 | `api/auth.js`、`api/admin.js` | **已提供并全量采用**：覆盖全部端点，9 个视图 + store + App 共 40 处调用点已迁移（无直接调用残留） | 模块函数返回原始 axios promise，迁移为纯改名，行为不变 |
+| Task 10 组件 | `components/Sidebar.vue`、`MobileNav.vue`、`Toast.vue` | 内联于 `App.vue` | 单页布局，拆分收益低 |
+| Task 18 安装 | `InstallController.java` + `Install.vue` | 安装端点并入 `AdminController`；**`Install.vue` 已提供**（`/install` 路由 + 未安装自动跳转） | 避免为单端点单独建控制器 |
+| Task 4 | `AuditLogService.java` | **已提供**（查询侧）；写入侧仍在 `CardService.logUsage` | 保持验证热路径不变 |
+| Task 19 健康检查 | Health check endpoint | `GET /api/health`（自研，未引入 actuator） | 避免额外暴露 actuator 端点 |
+| Task 19 请求日志 | Request logging filter | `RequestLoggingFilter`：仅记录方法/路径/状态/耗时/IP，**不记录请求体与查询串** | 防止卡密与令牌进入日志 |
+| Task 20 静态托管 | Option A：Spring Boot 托管 Vue 静态文件 | **已实现**：`WebMvcConfig` 提供 SPA 回退（`/cards` 等深链回退 index.html，缺失资源仍 404），`-Pwith-frontend` profile 把 `dist/` 打进 JAR；已实测（JAR 内含 21 个 static 条目） | 默认部署仍推荐 Option B（Nginx 终结 TLS），单 JAR 方式见 `docs/deployment.md` 4.4 |
+| Task 20 部署物料 | Docker Compose（MySQL + 后端） | **已提供**：`docker-compose.yml` + 后端/前端 `Dockerfile` + `nginx.conf` + `.env.example` | 作者环境无 Docker，**未实测** |
+| 文件映射 | `CaptchaController.java` | 未实现 | 原文已标注 optional（JWT 方案无需验证码） |
+
+### 安全修复对迁移语义的影响
+
+原实现存在若干功能性缺陷（标准卡型生卡必然失败、加密响应与存量客户端不兼容、迁移导入关联错乱、
+匿名可全局拉黑设备、未认证返回 403 等），已在同批修复中解决；相关**行为变更**（含破坏性的
+`ban_machine` 鉴权收紧）集中记录在 `docs/upgrade-notes.md`，部署与升级前必读。

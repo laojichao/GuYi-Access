@@ -27,6 +27,17 @@ GuYi Access 都为您准备了极其详尽的、开箱即用的对接源码。
 
 ---
 
+> ## ⚠️ 部署前必读：本仓库包含两套实现
+>
+> - **Java 版（推荐 · 当前维护）**：`guyi-backend`（Spring Boot 3.2.5 + Java 17）+ `guyi-frontend`（Vue 3）。
+>   部署步骤见 **[docs/deployment.md](docs/deployment.md)**，兼容性与行为变更见 [docs/upgrade-notes.md](docs/upgrade-notes.md)，
+>   也支持 `docker-compose.yml` 一键编排（MySQL + 后端 + 前端）。
+> - **PHP 版（历史遗留 · 仅供对照）**：根目录 `*.php`、`Verifyfile/`。**下文「部署与安装」「快速开始」章节描述的是 PHP 版**，
+>   请勿据此部署 Java 版。旧版中的硬编码「万能卡密」旁路与硬编码管理令牌已移除，管理令牌需通过环境变量
+>   `GUYI_ADMIN_API_TOKEN` 或系统设置 `admin_api_token` 配置。
+
+---
+
 ## 📋 目录
 
 - [✨ 核心特性](#-核心特性)
