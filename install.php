@@ -4,7 +4,9 @@ error_reporting(0);
 $step = isset($_GET['step']) ? intval($_GET['step']) : 1;
 $msg = '';
 
-$is_mobile = preg_match("/(android|avantgo|blackberry|bolt|boost|cricket|docomo|fone|hiptop|mini|mobi|palm|phone|pie|samsung|scp|wap|windows ce;iemobile|xhtml\\+xml)/i", $_SERVER["HTTP_USER_AGENT"] ?? '');
+// 注意：UA 正则里的各分支必须用竖线分隔；原先的 'windows ce;iemobile' 把分号当成了分隔符，
+// 导致该分支永远匹配不上（只影响背景图选择，不影响功能）。
+$is_mobile = preg_match("/(android|avantgo|blackberry|bolt|boost|cricket|docomo|fone|hiptop|mini|mobi|palm|phone|pie|samsung|scp|wap|windows ce|iemobile|xhtml\\+xml)/i", $_SERVER["HTTP_USER_AGENT"] ?? '');
 $bg_url = $is_mobile ? 'https://www.loliapi.com/acg/pe/' : 'https://www.loliapi.com/acg/pc/';
 
 function check_env() {
@@ -18,6 +20,26 @@ function check_env() {
 }
 
 if ($step == 3 && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    // 重装锁：已安装（admin 表已有账号）时拒绝再次安装。此前只要 install.php 还在磁盘上
+    // （@unlink 自删失败时就会发生），任何人都能匿名重写 config.php 并重置管理员密码。
+    // 数据库里的既有账号是不可伪造的判据，比"文件是否已删除"可靠得多。
+    try {
+        if (file_exists(__DIR__ . '/config.php')) {
+            require_once __DIR__ . '/config.php';
+            if (defined('DB_INSTALLED_CHECK') && defined('DB_HOST')) {
+                $probe = @new PDO(
+                    "mysql:host=" . DB_HOST . ";port=" . (defined('DB_PORT') ? DB_PORT : 3306) . ";dbname=" . DB_NAME . ";charset=utf8mb4",
+                    DB_USER, DB_PASS, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 3]);
+                if ($probe->query("SELECT COUNT(*) FROM admin")->fetchColumn() > 0) {
+                    http_response_code(403);
+                    die('系统已安装，安装向导不可重复执行。如需重置，请通过数据库操作。');
+                }
+            }
+        }
+    } catch (Throwable $e) {
+        // 探测失败不阻止安装：首次安装时数据库本身还不存在，这是正常路径
+    }
+
     $host = trim($_POST['db_host'] ?? '');
     $name = trim($_POST['db_name'] ?? '');
     $user = trim($_POST['db_user'] ?? '');
@@ -47,7 +69,9 @@ if ($step == 3 && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $step = 3;
             } else { $msg = '配置文件写入失败，请检查目录权限'; $step = 2; }
         } catch (PDOException $e) {
-            $msg = "数据库连接失败：" . $e->getMessage(); $step = 2;
+            // 不回显 $e->getMessage()：其中可能包含主机名、端口、账号等连接信息
+            error_log('install: database connection failed: ' . $e->getMessage());
+            $msg = "数据库连接失败，请检查连接信息后重试"; $step = 2;
         }
     }
 }

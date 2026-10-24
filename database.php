@@ -110,7 +110,14 @@ if (!class_exists('Database')) {
             ) $tableOptions");
             
             if ($this->pdo->query("SELECT COUNT(*) FROM admin")->fetchColumn() == 0) {
-                $this->pdo->prepare("INSERT IGNORE INTO admin (id, username, password_hash) VALUES (1, 'GuYi', ?)")->execute([password_hash('admin123', PASSWORD_DEFAULT)]);
+                // 不再使用可预测的默认口令（admin123）。跳过安装器直接建库/导入旧库时，
+                // 这里生成随机初始密码并写入 system_settings，由后台首次登录时强制修改。
+                // 正常安装流程由 install.php 调用 updateAdminPassword() 覆盖此值。
+                $initialPassword = bin2hex(random_bytes(9));
+                $this->pdo->prepare("INSERT IGNORE INTO admin (id, username, password_hash) VALUES (1, 'GuYi', ?)")
+                    ->execute([password_hash($initialPassword, PASSWORD_DEFAULT)]);
+                $this->pdo->prepare("INSERT IGNORE INTO system_settings (key_name, value) VALUES ('initial_password', ?)")
+                    ->execute([$initialPassword]);
             }
 
             try {
@@ -529,19 +536,33 @@ if (!class_exists('Database')) {
             return $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
 
-        public function searchCards($k) { 
-            $s="%$k%"; 
-            $q=$this->pdo->prepare("SELECT T1.*, T2.app_name FROM cards T1 JOIN applications T2 ON T1.app_id = T2.id WHERE (T1.card_code LIKE ? OR T1.notes LIKE ? OR T1.device_hash LIKE ? OR T2.app_name LIKE ? OR T1.card_type LIKE ?) AND T1.app_id > 0"); 
-            $q->execute([$s,$s,$s,$s,$s]); 
-            return $q->fetchAll(PDO::FETCH_ASSOC); 
+        public function searchCards($k) {
+            // Escape LIKE wildcards so user input cannot widen the match ("%" alone would otherwise
+            // return every card). '!' is the ESCAPE character declared in the query below.
+            $escaped = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], (string)$k);
+            $s = "%{$escaped}%";
+            $q=$this->pdo->prepare("SELECT T1.*, T2.app_name FROM cards T1 JOIN applications T2 ON T1.app_id = T2.id WHERE (T1.card_code LIKE ? ESCAPE '!' OR T1.notes LIKE ? ESCAPE '!' OR T1.device_hash LIKE ? ESCAPE '!' OR T2.app_name LIKE ? ESCAPE '!' OR T1.card_type LIKE ? ESCAPE '!') AND T1.app_id > 0");
+            $q->execute([$s,$s,$s,$s,$s]);
+            return $q->fetchAll(PDO::FETCH_ASSOC);
         }
 
         public function getUsageLogs($l, $o) { $q=$this->pdo->prepare("SELECT * FROM usage_logs ORDER BY access_time DESC LIMIT ? OFFSET ?"); $q->bindValue(1,$l,PDO::PARAM_INT); $q->bindValue(2,$o,PDO::PARAM_INT); $q->execute(); return $q->fetchAll(PDO::FETCH_ASSOC); }
         public function getActiveDevices() { return $this->pdo->query("SELECT T1.*, T2.app_name FROM active_devices T1 JOIN applications T2 ON T1.app_id = T2.id WHERE T1.status=1 AND T1.expire_time > NOW() AND T1.app_id > 0 ORDER BY T1.activate_time DESC")->fetchAll(PDO::FETCH_ASSOC); }
         
         // 支持传入自定义时间 $customDuration
-        public function generateCards($count, $type, $pre, $suf, $len, $note, $appId, $customDuration = 0) { 
+        public function generateCards($count, $type, $pre, $suf, $len, $note, $appId, $customDuration = 0) {
             if(empty($appId) || $appId <= 0) throw new Exception("必须指定有效的应用 ID");
+            // The prefix lands in card_code, which is echoed into the admin UI and into HTML/JS
+            // contexts. Restrict it to a short, quote-free token so it cannot inject markup or a
+            // JS string escape (card_code is varchar(50) and the random part is $len chars).
+            $pre = (string)$pre;
+            $maxPre = max(1, 50 - (int)$len - (int)strlen((string)$suf));
+            if (strlen($pre) > $maxPre) {
+                throw new Exception("卡密前缀过长（最多 {$maxPre} 个字符）");
+            }
+            if ($pre !== '' && !preg_match('/^[A-Za-z0-9_-]+$/', $pre)) {
+                throw new Exception("卡密前缀只能包含字母、数字、下划线与连字符");
+            }
             $this->pdo->beginTransaction(); 
             $generatedCodes = [];
             try { 
@@ -577,8 +598,13 @@ if (!class_exists('Database')) {
         }
 
         // 优化：流式导出数据，直接写入标准输出流，内存占用极小
-        public function exportAllDataStream($out) {
-            $tables = ['applications', 'app_variables', 'cards', 'active_devices', 'usage_logs', 'blacklists', 'system_settings', 'admin'];
+        // $includeCredentials=false（默认）时跳过 admin 表：其中含 bcrypt 口令哈希，
+        // 导出的 JSON 一旦泄露即可离线爆破，与 Java 版的默认脱敏行为保持一致。
+        public function exportAllDataStream($out, $includeCredentials = false) {
+            $tables = ['applications', 'app_variables', 'cards', 'active_devices', 'usage_logs', 'blacklists', 'system_settings'];
+            if ($includeCredentials) {
+                $tables[] = 'admin';
+            }
             fwrite($out, '{');
             $firstTable = true;
             foreach ($tables as $table) {
@@ -609,6 +635,18 @@ if (!class_exists('Database')) {
         // 优化：分批插单 (Batch Insert)，极大提高导入速度
         public function importAllData($data) {
             $tables = ['applications', 'app_variables', 'cards', 'active_devices', 'usage_logs', 'blacklists', 'system_settings', 'admin'];
+            // 列名白名单：导入文件的 JSON key 会直接拼入 INSERT 语句，必须按目标表逐一校验，
+            // 否则形如 {"applications":[{"app_name`; DROP TABLE x--":"v"}]} 的载荷即可注入 SQL。
+            $allowed = [
+                'applications'  => ['id','app_name','app_key','app_version','status','create_time','notes','update_url','force_update'],
+                'app_variables' => ['id','app_id','key_name','value','is_public','create_time'],
+                'cards'         => ['id','card_code','card_type','status','device_hash','used_time','expire_time','create_time','notes','app_id','custom_data','duration'],
+                'active_devices'=> ['id','device_hash','card_code','card_type','activate_time','expire_time','status','app_id'],
+                'usage_logs'    => ['id','card_code','card_type','device_hash','ip_address','user_agent','access_time','result','app_name'],
+                'blacklists'    => ['id','type','value','reason','create_time'],
+                'system_settings'=>['key_name','value'],
+                'admin'         => ['id','username','password_hash'],
+            ];
             $this->pdo->beginTransaction();
             try {
                 $this->pdo->exec("SET FOREIGN_KEY_CHECKS=0");
@@ -616,9 +654,14 @@ if (!class_exists('Database')) {
                     if (isset($data[$table]) && is_array($data[$table])) {
                         $this->pdo->exec("TRUNCATE TABLE `{$table}`");
                         if (!empty($data[$table])) {
-                            $columns = array_keys($data[$table][0]);
+                            // 丢弃任何不在白名单中的列（而不是直接拼接），保证拼入 SQL 的标识符可控
+                            $columns = array_values(array_intersect(
+                                array_map('strval', array_keys($data[$table][0])),
+                                $allowed[$table]
+                            ));
+                            if (empty($columns)) continue;
                             $colStr = implode(',', array_map(function($c){ return "`$c`"; }, $columns));
-                            
+
                             // 分批次插入，每批500条
                             $chunks = array_chunk($data[$table], 500);
                             foreach ($chunks as $chunk) {

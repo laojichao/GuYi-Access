@@ -35,6 +35,9 @@ public class AuthService {
      * Failed-login counters keyed by "username|clientIp". The IP is part of the key on purpose: with
      * a single administrator account, a username-only lockout would let anyone lock the operator out
      * of the system by submitting wrong passwords.
+     *
+     * <p>Entries are removed on success and whenever a lock expires, so the map cannot grow without
+     * bound from repeated failures against arbitrary usernames/IPs.
      */
     private final Map<String, LoginAttempt> attempts = new ConcurrentHashMap<>();
 
@@ -58,6 +61,13 @@ public class AuthService {
         if (lockedMillis > 0) {
             long remainingMinutes = Math.max(1, lockedMillis / 60_000 + 1);
             throw new AccountLockedException("登录失败次数过多，请 " + remainingMinutes + " 分钟后再试");
+        }
+        // A previous lock has expired: forget the entry so the map does not keep one stale record per
+        // (username, IP) pair forever. This must NOT run while failures are merely accumulating -
+        // recordFailure() mutates the mapped object in place, so removing it here would reset the
+        // counter on every attempt and the account could never be locked.
+        if (attempt.isExpired()) {
+            attempts.remove(attemptKey, attempt);
         }
 
         // Always run the bcrypt comparison so response timing does not reveal whether the
@@ -158,6 +168,15 @@ public class AuthService {
 
         synchronized long lockedForMillis() {
             return Math.max(lockedUntilMillis - System.currentTimeMillis(), 0);
+        }
+
+        /**
+         * True when this entry served a lock that has since expired, i.e. it holds no live state and
+         * can be evicted. An entry with pending (below-threshold) failures is never "expired": its
+         * counter must survive until the account is locked or a login succeeds.
+         */
+        synchronized boolean isExpired() {
+            return lockedUntilMillis > 0 && lockedUntilMillis <= System.currentTimeMillis();
         }
 
         synchronized boolean recordFailure(int maxAttempts, long lockMinutes) {

@@ -7,6 +7,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
@@ -19,6 +21,17 @@ import java.util.concurrent.atomic.AtomicLong;
 
 @Component
 public class RateLimitFilter implements Filter {
+
+    private static final Logger log = LoggerFactory.getLogger(RateLimitFilter.class);
+
+
+    /**
+     * Upper bound on tracked client addresses. The map is keyed by client IP, so without a cap an
+     * attacker rotating source addresses (or a large IPv6 range) could grow it without limit: the
+     * periodic cleanup only runs every 5 minutes and keeps every entry created in the current minute.
+     * When the cap is hit the whole map is dropped, which can only make limiting stricter.
+     */
+    private static final int MAX_TRACKED_CLIENTS = 100_000;
 
     @Value("${app.rate-limit.max-requests:60}")
     private int maxRequests;
@@ -51,6 +64,13 @@ public class RateLimitFilter implements Filter {
             String clientIp = getClientIp(httpReq);
             String currentMinute = MINUTE_FMT.format(LocalDateTime.now());
             int limit = (isLogin || isInstall) ? loginMaxRequests : maxRequests;
+
+            // Bounded memory: a flood of distinct source addresses must not grow the map forever.
+            // Dropping everything is safe - it only resets counters, so nobody is let past the limit.
+            if (rateMap.size() >= MAX_TRACKED_CLIENTS) {
+                log.warn("Rate-limit table reached {} entries; resetting counters", rateMap.size());
+                rateMap.clear();
+            }
 
             RateEntry entry = rateMap.compute(clientIp, (key, existing) -> {
                 if (existing == null || !existing.minute.equals(currentMinute)) {

