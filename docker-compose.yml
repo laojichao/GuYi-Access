@@ -46,6 +46,9 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
       # nginx 在容器内代理 /api，因此信任其转发的 X-Forwarded-For 末段
       TRUST_PROXY: "true"
+      # TZ alone does not pin the JVM default zone: the app reads APP_TIMEZONE at startup so that
+      # LocalDateTime.now() (card expiry) and the database's CURRENT_TIMESTAMP stay in the same zone.
+      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
       TZ: Asia/Shanghai
     ports:
       - "${BACKEND_PORT:-8080}:8080"

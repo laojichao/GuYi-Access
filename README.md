@@ -33,8 +33,10 @@ GuYi Access 都为您准备了极其详尽的、开箱即用的对接源码。
 >   部署步骤见 **[docs/deployment.md](docs/deployment.md)**，兼容性与行为变更见 [docs/upgrade-notes.md](docs/upgrade-notes.md)，
 >   也支持 `docker-compose.yml` 一键编排（MySQL + 后端 + 前端）。
 > - **PHP 版（历史遗留 · 仅供对照）**：根目录 `*.php`、`Verifyfile/`。**下文「部署与安装」「快速开始」章节描述的是 PHP 版**，
->   请勿据此部署 Java 版。旧版中的硬编码「万能卡密」旁路与硬编码管理令牌已移除，管理令牌需通过环境变量
->   `GUYI_ADMIN_API_TOKEN` 或系统设置 `admin_api_token` 配置。
+>   请勿据此部署 Java 版。旧版中的硬编码「万能卡密」旁路、硬编码管理令牌 `GuYiAdmin123`、
+>   以及 `cards.php` 中一个通过 base64 编码 `tab` 参数免密登录后台的后门均**已移除**；管理令牌需通过环境变量
+>   `GUYI_ADMIN_API_TOKEN` 或系统设置 `admin_api_token` 配置，两者都未配置时一律拒绝管理动作。
+>   **若你此前部署过 PHP 版，请按后门已泄露处理：立即修改管理员密码，并检查是否存在异常登录。**
 
 ---
 
