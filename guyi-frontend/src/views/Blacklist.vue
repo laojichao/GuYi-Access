@@ -28,8 +28,13 @@ async function addBlacklist() {
 
 async function removeBlacklist(id) {
   if (!confirm('确定解除封禁？')) return
-  await adminApi.deleteBlacklist(id)
-  loadBlacklist()
+  try {
+    const res = await adminApi.deleteBlacklist(id)
+    if (res.data.code === 200) loadBlacklist()
+    else alert(res.data.msg || '操作失败')
+  } catch (e) {
+    alert(e.response?.data?.msg || '操作失败')
+  }
 }
 </script>
 

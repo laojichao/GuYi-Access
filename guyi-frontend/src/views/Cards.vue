@@ -28,9 +28,15 @@ onMounted(async () => {
   } catch (e) {}
 })
 
-async function loadCards() {
+/**
+ * @param {boolean} [resetPage] set when the filter itself changed (app, type, status, keyword,
+ *   page size). Keeping the current page across a filter change can ask for a page beyond the new
+ *   result set, which answers an empty list that looks like "all data is gone".
+ */
+async function loadCards(resetPage = false) {
   loading.value = true
   selectedIds.value = []
+  if (resetPage) page.value = 1
   try {
     const params = { page: page.value - 1, limit: limit.value, sort: sort.value }
     if (filter.value === 'unused') params.status = 0
@@ -72,6 +78,16 @@ async function action(act, id) {
   } catch (e) { alert('操作失败') }
 }
 
+/** prompt() returns a string; validate it the same way the backend does (1-8760 hours). */
+function parseHours(input, label) {
+  const hours = parseFloat(input)
+  if (!isFinite(hours) || hours <= 0 || hours > 8760) {
+    alert(`${label}必须是 1-8760 之间的数字`)
+    return null
+  }
+  return hours
+}
+
 function toggleSelect(id) {
   const idx = selectedIds.value.indexOf(id)
   if (idx >= 0) selectedIds.value.splice(idx, 1)
@@ -84,6 +100,11 @@ function toggleSelectAll() {
 }
 
 async function batchAction(act) {
+  // These two act on every in-use card of the selected application (or of the whole system), not on
+  // the checked rows - gating them behind a selection is both misleading and blocking.
+  if (act === 'global-compensate') return globalCompensate()
+  if (act === 'clean-expired') return cleanExpired()
+
   if (!selectedIds.value.length) { alert('请先勾选卡密'); return }
   if (!confirm('确定执行批量操作？')) return
   try {
@@ -91,43 +112,87 @@ async function batchAction(act) {
     if (act === 'delete') res = await adminApi.batchDelete(selectedIds.value)
     else if (act === 'unbind') res = await adminApi.batchUnbind(selectedIds.value)
     else if (act === 'add-time') {
-      const hours = prompt('增加小时数', '24')
-      if (!hours || isNaN(hours)) return
-      res = await adminApi.batchAddTime(selectedIds.value, parseFloat(hours))
+      const input = prompt('增加小时数', '24')
+      if (input === null) return
+      const hours = parseHours(input, '增加时长')
+      if (hours === null) return
+      res = await adminApi.batchAddTime(selectedIds.value, hours)
     }
     else if (act === 'sub-time') {
-      const hours = prompt('扣除小时数', '24')
-      if (!hours || isNaN(hours)) return
-      res = await adminApi.batchSubTime(selectedIds.value, parseFloat(hours))
-    }
-    else if (act === 'global-compensate') {
-      const hours = prompt('为所有在用卡密统一补偿小时数:', '12')
-      if (!hours || isNaN(hours)) return
-      const body = { hours: parseFloat(hours) }
-      if (appFilter.value) body.app_id = parseInt(appFilter.value)
-      res = await adminApi.globalCompensate(body)
-    }
-    else if (act === 'clean-expired') {
-      res = await adminApi.cleanExpired()
+      const input = prompt('扣除小时数', '24')
+      if (input === null) return
+      const hours = parseHours(input, '扣除时长')
+      if (hours === null) return
+      res = await adminApi.batchSubTime(selectedIds.value, hours)
     }
     else if (act === 'export') {
-      res = await adminApi.exportCards(selectedIds.value)
-      if (res.status === 200) {
+      try {
+        const res = await adminApi.exportCards(selectedIds.value)
+        if (res.status !== 200) { alert('导出失败'); return }
         const url = URL.createObjectURL(res.data)
         const a = document.createElement('a'); a.href = url; a.download = `cards_export_${Date.now()}.txt`; a.click()
         URL.revokeObjectURL(url)
-        return
+      } catch (err) {
+        // The endpoint answers a transport-level error (400 "未选择要导出的卡密") with a real HTTP
+        // status, so axios rejects: read the JSON body out of the blob to show the actual reason.
+        let msg = '导出失败'
+        try {
+          const text = await err.response?.data?.text?.()
+          if (text) msg = JSON.parse(text).msg || msg
+        } catch (e) { /* keep the generic message */ }
+        alert(msg)
       }
+      return
     }
     if (res?.data?.code === 200) loadCards()
     else alert(res?.data?.msg || '操作失败')
   } catch (e) { alert('操作失败') }
 }
 
+/**
+ * Adds time to every in-use card of the current application filter (or of the whole system when no
+ * application is selected). Independent of the checked rows on purpose - the backend only reads
+ * hours/app_id, so requiring a selection here would be a meaningless extra step.
+ */
+async function globalCompensate() {
+  const input = prompt('为所有在用卡密统一补偿小时数:', '12')
+  if (input === null) return
+  const hours = parseHours(input, '补偿时长')
+  if (hours === null) return
+  if (!confirm(`将为${appFilter.value ? '当前应用' : '全部应用'}的所有在用卡密增加 ${hours} 小时，确定？`)) return
+  const body = { hours }
+  if (appFilter.value) body.app_id = parseInt(appFilter.value)
+  try {
+    const res = await adminApi.globalCompensate(body)
+    if (res.data.code === 200) loadCards()
+    else alert(res.data.msg || '操作失败')
+  } catch (e) { alert('操作失败') }
+}
+
+/** Deletes every expired card system-wide. Also independent of the checked rows. */
+async function cleanExpired() {
+  if (!confirm('将清理所有已过期的卡密（不可恢复），确定？')) return
+  try {
+    const res = await adminApi.cleanExpired()
+    if (res.data.code === 200) loadCards()
+    else alert(res.data.msg || '操作失败')
+  } catch (e) { alert('操作失败') }
+}
+
+/** Three states so the user can get back to the default (newest first) ordering. */
 function toggleSort() {
-  sort.value = sort.value === 'expire_asc' ? 'expire_desc' : 'expire_asc'
+  if (sort.value === 'expire_asc') sort.value = 'expire_desc'
+  else if (sort.value === 'expire_desc') sort.value = 'create_desc'
+  else sort.value = 'expire_asc'
   loadCards()
 }
+
+// Neutral glyph while the list is sorted by creation time, so the header does not advertise an
+// expiry ordering that is not in effect.
+const sortIconClass = computed(() =>
+  sort.value === 'expire_asc' ? 'ph-bold ph-sort-ascending'
+    : sort.value === 'expire_desc' ? 'ph-bold ph-sort-descending'
+      : 'ph-bold ph-arrows-down-up')
 
 // navigator is not reachable from template expressions, so copying goes through here
 const copiedKey = ref('')
@@ -164,14 +229,14 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit.valu
     <!-- Search & Filters -->
     <div class="rise rise-1" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">
       <div style="position:relative;flex:1;min-width:150px">
-        <input v-model="searchQuery" class="field" style="padding-left:36px;height:38px;font-size:12px" placeholder="模糊搜索..." @keyup.enter="loadCards" />
+        <input v-model="searchQuery" class="field" style="padding-left:36px;height:38px;font-size:12px" placeholder="模糊搜索..." @keyup.enter="loadCards(true)" />
         <i class="ph-bold ph-magnifying-glass" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-4);font-size:13px"></i>
       </div>
-      <select v-model="appFilter" class="field-s" style="height:38px;font-size:11px;min-width:120px" @change="typeFilter=''; loadCards()">
+      <select v-model="appFilter" class="field-s" style="height:38px;font-size:11px;min-width:120px" @change="typeFilter=''; loadCards(true)">
         <option value="">全部应用</option>
         <option v-for="app in apps" :key="app.id" :value="app.id">{{ app.app_name }}</option>
       </select>
-      <select v-if="appFilter" v-model="typeFilter" class="field-s" style="height:38px;font-size:11px;min-width:100px" @change="loadCards()">
+      <select v-if="appFilter" v-model="typeFilter" class="field-s" style="height:38px;font-size:11px;min-width:100px" @change="loadCards(true)">
         <option value="">全部类型</option>
         <option v-for="(cfg, key) in cardTypes" :key="key" :value="key">{{ cfg.name }}</option>
       </select>
@@ -182,7 +247,7 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit.valu
     <div class="rise rise-1" style="display:flex;gap:6px;margin-bottom:12px;overflow-x:auto">
       <button v-for="f in [{v:'all',l:'全部'},{v:'unused',l:'未激活'},{v:'active',l:'已激活'},{v:'banned',l:'已封禁'}]" :key="f.v"
         :class="filter === f.v ? 'pill pill-vip' : 'pill pill-free'" style="font-size:9px;padding:6px 12px;cursor:pointer;border:none"
-        @click="filter = f.v; loadCards()">{{ f.l }}</button>
+        @click="filter = f.v; loadCards(true)">{{ f.l }}</button>
     </div>
 
     <!-- Cards Table -->
@@ -206,7 +271,7 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit.valu
             <th style="padding:14px;text-align:left;font-size:9px;font-weight:800;color:var(--text-4);text-transform:uppercase">应用</th>
             <th style="padding:14px;text-align:left;font-size:9px;font-weight:800;color:var(--text-4);text-transform:uppercase">卡密代码</th>
             <th style="padding:14px;text-align:left;font-size:9px;font-weight:800;color:var(--text-4);text-transform:uppercase">状态</th>
-            <th style="padding:14px;text-align:left;font-size:9px;font-weight:800;color:var(--text-4);text-transform:uppercase">到期时间 <button @click="toggleSort" style="background:none;border:none;cursor:pointer;color:var(--sys-pink);font-size:10px"><i :class="sort === 'expire_asc' ? 'ph-bold ph-sort-ascending' : 'ph-bold ph-sort-descending'"></i></button></th>
+            <th style="padding:14px;text-align:left;font-size:9px;font-weight:800;color:var(--text-4);text-transform:uppercase">到期时间 <button @click="toggleSort" title="按到期时间排序" style="background:none;border:none;cursor:pointer;color:var(--sys-pink);font-size:10px"><i :class="sortIconClass"></i></button></th>
             <th style="padding:14px;text-align:left;font-size:9px;font-weight:800;color:var(--text-4);text-transform:uppercase">设备</th>
             <th style="padding:14px;text-align:right;font-size:9px;font-weight:800;color:var(--text-4);text-transform:uppercase">操作</th>
           </tr></thead>
@@ -234,7 +299,7 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit.valu
 
       <!-- Pagination -->
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px;border-top:0.5px solid rgba(255,255,255,0.04)">
-        <select v-model="limit" class="field-s" style="font-size:10px;padding:4px 24px 4px 8px;border-radius:8px" @change="loadCards">
+        <select v-model="limit" class="field-s" style="font-size:10px;padding:4px 24px 4px 8px;border-radius:8px" @change="loadCards(true)">
           <option :value="10">10/页</option>
           <option :value="20">20/页</option>
           <option :value="50">50/页</option>

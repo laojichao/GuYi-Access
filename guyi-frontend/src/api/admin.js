@@ -57,12 +57,18 @@ export const adminApi = {
   /** Credentials are excluded by default; pass true to include the admin table. */
   exportSystem: (includeCredentials = false) =>
     api.get('/api/admin/system/export', {
-      params: { include_credentials: includeCredentials },
+      // Must match the controller's @RequestParam name exactly - Spring does not translate
+      // snake_case, so a mismatch silently exports WITHOUT credentials.
+      params: { includeCredentials },
       responseType: 'blob'
     }),
   importSystem: (formData) =>
     api.post('/api/admin/system/import', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': 'multipart/form-data' },
+      // The instance-wide 30s default is too short for a 50MB migration file on a slow link: the
+      // request would be aborted client-side while the backend keeps importing, so the UI reports a
+      // failure that did not happen. Match the reverse proxy's 120s read timeout.
+      timeout: 120000
     }),
 
   // ---- first-run install (public endpoint) ----

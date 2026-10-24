@@ -61,7 +61,17 @@ async function createApp() {
 }
 
 function openEdit(app) {
-  editForm.value = { ...app }
+  // The list endpoint returns "notes" while PUT /apps/{id} reads "app_notes" (see ApplicationService
+  // and AdminController). Spreading the row as-is leaves app_notes undefined: the textarea renders
+  // empty and saving then overwrites the stored notes with "" - silent data loss. Map it explicitly.
+  editForm.value = {
+    id: app.id,
+    app_name: app.app_name || '',
+    app_version: app.app_version || '',
+    app_notes: app.notes || '',
+    update_url: app.update_url || '',
+    force_update: app.force_update || 0
+  }
   editModal.value = true
 }
 
@@ -74,8 +84,13 @@ async function saveEdit() {
 }
 
 async function toggleApp(id) {
-  await adminApi.toggleApp(id)
-  loadApps()
+  try {
+    const res = await adminApi.toggleApp(id)
+    if (res.data.code === 200) loadApps()
+    else alert(res.data.msg || '操作失败')
+  } catch (e) {
+    alert(e.response?.data?.msg || '操作失败')
+  }
 }
 
 async function deleteApp(id) {

@@ -35,7 +35,8 @@ async function handleInstall() {
     await authStore.verifyToken()
     router.push('/dashboard')
   } catch (e) {
-    error.value = '安装失败，请检查后端是否可用'
+    // Prefer the backend's own message (wrong install_token, rate limited, ...) over a generic hint
+    error.value = e.response?.data?.msg || '安装失败，请检查后端是否可用'
   } finally {
     loading.value = false
   }

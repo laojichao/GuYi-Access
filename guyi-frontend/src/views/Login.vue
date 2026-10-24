@@ -18,7 +18,9 @@ async function handleLogin() {
     await authStore.login(password.value)
     router.push('/dashboard')
   } catch (e) {
-    error.value = e.message || '密钥无效'
+    // Rate limiting answers 429 with a JSON body; showing axios' default English text
+    // ("Request failed with status code 429") hides the real reason from the operator.
+    error.value = e.response?.data?.msg || e.message || '密钥无效'
   } finally {
     loading.value = false
   }

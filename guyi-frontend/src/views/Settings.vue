@@ -47,7 +47,14 @@ async function updatePassword() {
 
 async function exportData() {
   try {
-    const res = await adminApi.exportSystem()
+    // Credentials are excluded unless the operator asks for them: the file would otherwise carry
+    // the bcrypt hash of the admin password (and, in the PHP export, the admin_api_token).
+    const includeCredentials = includeCred.checked === true
+    if (includeCredentials
+        && !confirm('导出文件将包含管理员口令哈希。任何拿到该文件的人都可离线爆破，确定继续？')) {
+      return
+    }
+    const res = await adminApi.exportSystem(includeCredentials)
     const url = URL.createObjectURL(res.data)
     const a = document.createElement('a')
     a.href = url
@@ -58,16 +65,24 @@ async function exportData() {
 }
 
 async function importData(event) {
-  const file = event.target.files[0]
+  const input = event.target
+  const file = input.files[0]
   if (!file) return
-  if (!confirm('警告：该操作将清空当前系统的全部数据并进行彻底覆盖！是否确认继续？')) return
+  if (!confirm('警告：该操作将清空当前系统的全部数据并进行彻底覆盖！是否确认继续？')) {
+    input.value = ''   // cancelled: still reset so the same file can be picked again
+    return
+  }
   const formData = new FormData()
   formData.append('file', file)
   try {
     const res = await adminApi.importSystem(formData)
-    if (res.data.code === 200) alert(res.data.msg)
-    else alert(res.data.msg)
-  } catch (e) { alert('导入失败') }
+    alert(res.data.msg || '导入完成')
+  } catch (e) {
+    alert(e.response?.data?.msg || '导入失败')
+  } finally {
+    // Without this, re-selecting the SAME file fires no change event and the import never starts
+    input.value = ''
+  }
 }
 </script>
 
@@ -113,8 +128,12 @@ async function importData(event) {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
           <div class="glass-sunken" style="padding:16px;border-radius:16px">
             <h4 style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.8);margin-bottom:8px">导出数据</h4>
-            <p style="font-size:10px;color:var(--text-4);margin-bottom:16px">将全部数据打包为 JSON 备份文件。</p>
+            <p style="font-size:10px;color:var(--text-4);margin-bottom:12px">将全部数据打包为 JSON 备份文件。<span style="color:rgba(255,255,255,0.6)">默认不含管理员凭据</span>（导入后保留目标机现有账号）。</p>
             <button class="btn btn-sys-orange" style="width:100%;padding:10px;justify-content:center" @click="exportData"><i class="ph-bold ph-download-simple"></i> 导出完整数据包</button>
+            <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:10px;color:var(--text-4);cursor:pointer">
+              <input id="incCred" type="checkbox" style="accent-color:var(--sys-orange)" />
+              包含管理员凭据（含口令哈希，请妥善保管）
+            </label>
           </div>
           <div class="glass-sunken" style="padding:16px;border-radius:16px">
             <h4 style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.8);margin-bottom:8px">导入数据</h4>
