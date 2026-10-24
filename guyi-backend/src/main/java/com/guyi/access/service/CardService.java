@@ -212,6 +212,12 @@ public class CardService {
         if (prefix != null && prefix.length() > MAX_CARD_PREFIX_LENGTH) {
             throw new BusinessException("卡密前缀不能超过 " + MAX_CARD_PREFIX_LENGTH + " 个字符");
         }
+        // The prefix becomes part of card_code, which the admin UI copies into onclick="copy('...')"
+        // and displays raw. Keeping it to a short alphanumeric token means it can never break out of
+        // that context, and keeps card_code inside its varchar(50) column.
+        if (prefix != null && !prefix.isEmpty() && !prefix.matches("[A-Za-z0-9_-]+")) {
+            throw new BusinessException("卡密前缀只能包含字母、数字、下划线与连字符");
+        }
 
         List<Card> cards = new ArrayList<>();
         List<String> codes = new ArrayList<>();
@@ -295,11 +301,20 @@ public class CardService {
 
     // ========== Card Status ==========
 
+    /**
+     * Updates a card's status.
+     *
+     * @return the status that was actually written, which can differ from the requested one: a card
+     *         that was never activated has no expiry, so "1 = activated" is unreachable for it and an
+     *         unban resolves to "unused" (0) instead.
+     */
     @Transactional
-    public void updateCardStatus(Integer id, Integer status) {
+    public int updateCardStatus(Integer id, Integer status) {
         Card card = cardRepository.findById(id)
                 .orElseThrow(() -> new BusinessException("卡密不存在"));
-        if (status == 1 && (card.getExpireTime() == null)) {
+        // Previously this silently rewrote the status to 0 while the endpoint still answered
+        // "卡密状态已更新", so an operator's unban click looked applied but was not.
+        if (status == 1 && card.getExpireTime() == null) {
             status = 0;
         }
         card.setStatus(status);
@@ -308,6 +323,7 @@ public class CardService {
         if (status == 2) {
             activeDeviceRepository.deleteByCardCode(card.getCardCode());
         }
+        return status;
     }
 
     // @Transactional is required on the entry points themselves: an internal this. call would

@@ -130,7 +130,11 @@ public class SystemService {
                 app.setAppName(toStr(getField(row, "appName", "app_name")));
                 app.setAppKey(toStr(getField(row, "appKey", "app_key")));
                 app.setAppVersion(toStr(getField(row, "appVersion", "app_version")));
-                app.setStatus(toInt(getField(row, "status")));
+                // A migration file without a status column would otherwise import every application
+                // as DISABLED (toInt(null) == 0): the entity default is 1, so keep it when the file
+                // does not say otherwise. An explicit 0/1 in the file is still honoured.
+                Object statusField = getField(row, "status");
+                app.setStatus(statusField == null ? 1 : toInt(statusField));
                 app.setCreateTime(toDateTime(getField(row, "createTime", "create_time")));
                 app.setNotes(toStr(getField(row, "notes")));
                 app.setUpdateUrl(toStr(getField(row, "updateUrl", "update_url")));
@@ -179,6 +183,15 @@ public class SystemService {
                 card.setAppId(appIdMap.getOrDefault(oldCardAppId, oldCardAppId));
                 card.setCustomData(toStr(getField(row, "customData", "custom_data")));
                 card.setDuration(toInt(getField(row, "duration")));
+                // An "activated" card without an expiry is unusable by definition: verifyCard() rejects
+                // it as expired forever (the PHP schema made expire_time NOT NULL, so this state could
+                // not be produced there). Demote it to unused so it can still be activated normally
+                // instead of silently importing a permanently dead card.
+                if (card.getStatus() == 1 && card.getExpireTime() == null) {
+                    card.setStatus(0);
+                    card.setDeviceHash(null);
+                    card.setUsedTime(null);
+                }
                 cardRepository.save(card);
             }
         }

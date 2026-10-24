@@ -20,6 +20,8 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.ResponseErrorHandler;
 import org.springframework.web.client.RestTemplate;
 
@@ -258,7 +260,7 @@ class EndToEndApiTest {
     }
 
     @Test
-    @Order(15)
+    @Order(44)
     void repeatedLoginFailuresLockTheAccount() throws Exception {
         for (int attempt = 1; attempt <= 5; attempt++) {
             ResponseEntity<String> response = rest.exchange(baseUrl + "/api/auth/login", HttpMethod.POST,
@@ -277,7 +279,7 @@ class EndToEndApiTest {
     }
 
     @Test
-    @Order(16)
+    @Order(45)
     void logoutRevokesPreviouslyIssuedTokens() throws Exception {
         JsonNode logout = post("/api/auth/logout", "{}", authHeaders());
         assertEquals(200, logout.path("code").asInt());
@@ -365,5 +367,147 @@ class EndToEndApiTest {
         JsonNode body = mapper.readTree(response.getBody());
         assertEquals(404, body.path("code").asInt(), response.getBody());
         assertFalse(body.toString().contains("Exception"), "error bodies must not leak internals");
+    }
+
+    /**
+     * An unmapped /api/** path has to reach the DispatcherServlet (so it can answer 404) even without
+     * a token. Authorizing first would answer 401 for a path that does not exist, which contradicts
+     * the documented status codes and hides the real cause from clients.
+     */
+    @Test
+    @Order(20)
+    void unknownApiPathAnswers404EvenWithoutToken() throws Exception {
+        ResponseEntity<String> response = rest.exchange(baseUrl + "/api/admin/does-not-exist", HttpMethod.GET,
+                new HttpEntity<>(jsonHeaders()), String.class);
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode(),
+                "an unmapped API path must 404, not 401: body=" + response.getBody());
+        JsonNode body = mapper.readTree(response.getBody());
+        assertEquals(404, body.path("code").asInt(), response.getBody());
+    }
+
+    /**
+     * "Activated" without an expiry is a state verifyCard() can never satisfy (it reports the card as
+     * expired forever). The PHP schema made expire_time NOT NULL, so a migration file carrying such a
+     * row is malformed: importing it as-is would create a permanently dead card, so it is demoted to
+     * unused and can still be activated normally afterwards.
+     */
+    @Test
+    @Order(42)
+    void importDemotesActivatedCardWithoutExpiry() throws Exception {
+        // The import wipes every table, so the payload carries its own application row with a fresh
+        // app_key (reusing the old one collides with the unique index while H2 replays the identity
+        // sequence). It must be 64 hex chars: the app_key doubles as the AES-256 key.
+        byte[] keyBytes = new byte[32];
+        new java.security.SecureRandom().nextBytes(keyBytes);
+        StringBuilder hex = new StringBuilder(64);
+        for (byte b : keyBytes) {
+            hex.append(String.format("%02x", b));
+        }
+        String freshKey = hex.toString();
+        String payload = "{\"applications\":[{\"id\":1,\"app_name\":\"Import App\",\"app_key\":\"" + freshKey + "\"}],"
+                + "\"cards\":[{\"card_code\":\"NOEXPIRY1\",\"card_type\":\"day\",\"status\":1,"
+                + "\"device_hash\":\"ghost-device\",\"appId\":1,\"duration\":0}]}";
+        assertEquals(200, importBackup(payload).path("code").asInt());
+
+        JsonNode found = get("/api/admin/cards?q=NOEXPIRY1&page=0&limit=5", authHeaders())
+                .path("data").path("cards");
+        assertEquals(1, found.size(), "the card must have been imported");
+        assertEquals(0, found.get(0).path("status").asInt(),
+                "a status=1 card with no expiry must be imported as unused");
+
+        // ...and it is now usable: activating it sets a real expiry
+        JsonNode verify = post("/api/verify",
+                "{\"app_key\":\"" + freshKey + "\",\"card_code\":\"NOEXPIRY1\",\"device_hash\":\"fresh-device\"}",
+                jsonHeaders());
+        String encrypted = verify.path("encrypted_data").asText();
+        assertFalse(encrypted.isEmpty(),
+                "activation must answer an encrypted payload, got: " + verify);
+        String plaintext = AesUtil.decrypt(encrypted, freshKey);
+        assertEquals(200, mapper.readTree(plaintext).path("code").asInt(), plaintext);
+        assertFalse(mapper.readTree(plaintext).path("data").path("expire_time").asText().isEmpty(), plaintext);
+    }
+
+    /** The import endpoint takes a multipart file named "file", like the admin UI sends. */
+    private JsonNode importBackup(String json) throws Exception {
+        // Start from the auth headers so the bearer token survives the multipart content type
+        HttpHeaders headers = authHeaders();
+        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+        org.springframework.core.io.ByteArrayResource resource =
+                new org.springframework.core.io.ByteArrayResource(json.getBytes("UTF-8")) {
+                    @Override
+                    public String getFilename() {
+                        return "backup.json";
+                    }
+                };
+        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+        body.add("file", resource);
+        ResponseEntity<String> response = rest.exchange(baseUrl + "/api/admin/system/import", HttpMethod.POST,
+                new HttpEntity<>(body, headers), String.class);
+        assertTrue(response.getStatusCode().is2xxSuccessful(),
+                "import returned " + response.getStatusCode() + ": " + response.getBody());
+        return mapper.readTree(response.getBody());
+    }
+
+    /**
+     * Unbanning a card that was never activated cannot restore "activated" (it has no expiry). The
+     * endpoint must report the state it actually wrote instead of claiming the requested one.
+     */
+    @Test
+    @Order(43)
+    void unbanningNeverActivatedCardReportsTheStateItWrote() throws Exception {
+        // Re-read the app id: the import test before this one rewrites the ids the database assigns
+        int currentAppId = get("/api/admin/apps", authHeaders())
+                .path("data").get(0).path("id").asInt();
+        assertTrue(currentAppId > 0, "an application must exist to attach the card to");
+
+        JsonNode generated = post("/api/admin/cards/generate",
+                "{\"app_id\":" + currentAppId + ",\"type\":\"day\",\"num\":1,\"pre\":\"NVB\"}", authHeaders());
+        String code = generated.path("data").path("cards").get(0).asText();
+        int id = get("/api/admin/cards?q=" + code + "&page=0&limit=5", authHeaders())
+                .path("data").path("cards").get(0).path("id").asInt();
+
+        // The UI offers "ban" for any card that is not already banned, including unused ones
+        assertEquals(200, put("/api/admin/cards/" + id + "/status", "{\"status\":2}", authHeaders())
+                .path("code").asInt());
+        JsonNode unban = put("/api/admin/cards/" + id + "/status", "{\"status\":1}", authHeaders());
+        assertEquals(200, unban.path("code").asInt(), unban.toString());
+        assertEquals(0, unban.path("data").path("status").asInt(),
+                "unbanning a never-activated card resolves to unused (0), not activated (1)");
+        assertEquals(0, get("/api/admin/cards?q=" + code + "&page=0&limit=5", authHeaders())
+                .path("data").path("cards").get(0).path("status").asInt());
+    }
+
+    /**
+     * The prefix becomes part of card_code, which the admin UI copies straight into
+     * onclick="copy('...')". A quote or angle bracket in it would break out of that context, so the
+     * generator must reject anything outside [A-Za-z0-9_-].
+     */
+    @Test
+    @Order(21)
+    void cardPrefixIsRestrictedToSafeCharacters() throws Exception {
+        // JSON-escape each payload so the request itself stays valid: the point under test is the
+        // server-side whitelist, not Jackson's parser.
+        for (String bad : new String[]{"<script>", "a'b", "a\"b", "a;b", "a b", "%' OR 1=1--"}) {
+            String escaped = bad.replace("\\", "\\\\").replace("\"", "\\\"");
+            JsonNode rejected = post("/api/admin/cards/generate",
+                    "{\"app_id\":" + appId + ",\"type\":\"day\",\"num\":1,\"pre\":\"" + escaped + "\"}",
+                    authHeaders());
+            assertEquals(400, rejected.path("code").asInt(),
+                    "prefix must be rejected: " + bad + " -> " + rejected);
+        }
+        // A well-formed prefix still works
+        JsonNode ok = post("/api/admin/cards/generate",
+                "{\"app_id\":" + appId + ",\"type\":\"day\",\"num\":1,\"pre\":\"VIP-2026_\"}", authHeaders());
+        assertEquals(200, ok.path("code").asInt(), ok.toString());
+        assertTrue(ok.path("data").path("cards").get(0).asText().startsWith("VIP-2026_"), ok.toString());
+    }
+
+    private JsonNode put(String path, String body, HttpHeaders headers) throws Exception {
+        ResponseEntity<String> response = rest.exchange(baseUrl + path, HttpMethod.PUT,
+                new HttpEntity<>(body, headers), String.class);
+        assertTrue(response.getStatusCode().is2xxSuccessful(),
+                "PUT " + path + " returned " + response.getStatusCode() + ": " + response.getBody());
+        return mapper.readTree(response.getBody());
     }
 }

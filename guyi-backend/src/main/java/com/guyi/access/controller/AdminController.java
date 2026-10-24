@@ -418,8 +418,13 @@ public class AdminController {
         if (status == null || status < 0 || status > 2) {
             return ResponseEntity.ok(ApiResponse.error(400, "状态值无效（0=未激活 1=已激活 2=封禁）"));
         }
-        cardService.updateCardStatus(id, status);
-        return ResponseEntity.ok(ApiResponse.success("卡密状态已更新"));
+        int applied = cardService.updateCardStatus(id, status);
+        // Unbanning a never-activated card cannot restore "activated" (it has no expiry): report the
+        // state that was actually written instead of claiming the requested one.
+        String msg = applied == status
+                ? "卡密状态已更新"
+                : "该卡密尚未激活，已恢复为未激活状态";
+        return ResponseEntity.ok(ApiResponse.success(msg, Map.of("status", applied)));
     }
 
     @DeleteMapping("/cards/{id}")
