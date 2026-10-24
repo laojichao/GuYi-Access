@@ -1,7 +1,7 @@
-# GuYi Access Pro · Java 版部署指南
+# GuYi Access Pro · 部署指南
 
-本仓库包含两套实现，**本文件只描述 Java 版**（`guyi-backend` + `guyi-frontend`）。根目录的 `*.php`
-与 `Verifyfile/` 是历史 PHP 版，见 [README](../README.md) 末尾说明。
+本系统由 `guyi-backend`（REST API）与 `guyi-frontend`（管理后台）组成。早期的 PHP 实现
+已于 2026-10 从仓库移除，其数据可通过「系统迁移」功能导入本系统（兼容旧导出格式）。
 
 ```
 guyi-backend/     Spring Boot 3.2.5 + Java 17 + MySQL（REST API，默认端口 8080）

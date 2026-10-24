@@ -202,8 +202,13 @@ class EndToEndApiTest {
         String plaintext = AesUtil.decrypt(encrypted, appKey);
         JsonNode payload = mapper.readTree(plaintext);
         assertEquals(200, payload.path("code").asInt(), plaintext);
-        assertFalse(payload.path("data").path("expire_time").asText().isEmpty(),
-                "activation must return an expiry time: " + plaintext);
+        String expireTime = payload.path("data").path("expire_time").asText();
+        assertFalse(expireTime.isEmpty(), "activation must return an expiry time: " + plaintext);
+        // The PHP backend returned MySQL DATETIME strings and the README example documents that
+        // format; LocalDateTime.toString()'s ISO 'T' separator would break every existing SDK.
+        assertTrue(expireTime.matches("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}"),
+                "expire_time must be 'yyyy-MM-dd HH:mm:ss' (space separator, always 2-digit seconds), got: "
+                        + expireTime);
     }
 
     @Test

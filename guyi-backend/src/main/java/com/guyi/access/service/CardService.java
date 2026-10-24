@@ -104,7 +104,7 @@ public class CardService {
 
                 logUsage(cardCode, ad.getCardType(), deviceHash, clientIp, userAgent, "设备活跃", appName);
                 return Map.of("success", true, "message", "设备已激活",
-                        "expire_time", ad.getExpireTime().toString(),
+                        "expire_time", formatExpireTime(ad.getExpireTime()),
                         "app_id", appId, "custom_data", card.getCustomData() != null ? card.getCustomData() : "");
             }
         }
@@ -151,7 +151,7 @@ public class CardService {
             logUsage(cardCode, card.getCardType(), deviceHash, clientIp, userAgent, "验证通过", appName);
 
             return Map.of("success", true, "message", "验证通过",
-                    "expire_time", card.getExpireTime().toString(),
+                    "expire_time", formatExpireTime(card.getExpireTime()),
                     "app_id", appId,
                     "custom_data", card.getCustomData() != null ? card.getCustomData() : "");
         } else if (card.getStatus() != 0) {
@@ -184,7 +184,7 @@ public class CardService {
 
             logUsage(cardCode, card.getCardType(), deviceHash, clientIp, userAgent, "激活成功", appName);
             return Map.of("success", true, "message", "首次激活成功",
-                    "expire_time", card.getExpireTime().toString(),
+                    "expire_time", formatExpireTime(card.getExpireTime()),
                     "app_id", appId,
                     "custom_data", newCustomData != null ? newCustomData : "");
         }
@@ -460,6 +460,19 @@ public class CardService {
     }
 
     // ========== Card Types ==========
+
+    /**
+     * Formats an expiry for the verify API: {@code yyyy-MM-dd HH:mm:ss} with a space separator,
+     * exactly what the PHP version returned (MySQL DATETIME) and what the documented response
+     * example in the README shows. {@code LocalDateTime.toString()} would emit ISO format with a
+     * 'T' (and drop the seconds entirely at .00), which breaks every existing client SDK that
+     * parses the documented format.
+     */
+    private static String formatExpireTime(LocalDateTime time) {
+        return time == null ? null : time.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+    }
+
+
 
     public static Map<String, Object> getCardTypes() {
         Map<String, Object> types = new LinkedHashMap<>();
